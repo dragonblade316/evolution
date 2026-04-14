@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "apps/cu_example_app", 
+    "apps/masterpiece",
+    "components/bridges/cu_example_shared_bridge", 
+    "components/bridges/moteus_bridge", "components/tasks/diffdrive", 
+    "components/payloads/common",
+]
+resolver = "2"
+
+[workspace.dependencies]
+cu29 = {  version = "*"  }
+cu29-export = { version = "*"  }
+bincode = { package = "cu-bincode", version = "2.0", default-features = false, features = ["derive", "alloc"] }
+serde = { version = "*", features = ["derive"] }
+
+#internal deps
+common = { path = "./components/payloads/common/" }
