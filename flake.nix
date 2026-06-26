@@ -2,7 +2,10 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs?ref=release-25.11";
-    robotics-scripts.url = "github:dragonblade316/robotics-scripts";
+    robotics-scripts = {
+      url = "github:dragonblade316/robotics-scripts";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -23,13 +26,15 @@
         inherit system overlays;
         config.allowUnfree = true;
       };
-      onshape-to-robot = robotics-scripts.packages.${system}.rabault-onshape-to-robot;
+      onshape-to-robot = robotics-scripts.packages.${system}.onshape-to-robot;
+      moteus_gui = robotics-scripts.packages.${system}.moteus-gui;
       rust = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
     in
       with pkgs; rec {
         devShell = mkShell rec {
         buildInputs = [
-            rust-bin.stable.latest.default
+            # rust-bin.stable.latest.default
+            cargo
             rust-analyzer
 
             perf
@@ -61,11 +66,25 @@
             xorg.libXi
             xorg.libX11
             onshape-to-robot
+            moteus_gui
 
             #for bevy
             alsa-lib
             #why is libudev in systemd?
             systemd
+                
+            #things for flutter
+            flutter
+            gtk3
+            cmake
+            ninja
+
+            #things for shotcal
+            (pkgs.python3.withPackages (ps: with ps; [
+              numpy
+              scipy
+              plotly
+            ]))
           ];
 
           shellHook = ''
@@ -76,7 +95,11 @@
           env.MUJOCO_PLUGIN_PATH = "${mujoco}/lib";
           env.MUJOCO_DYNAMIC_LINK_DIR = "${mujoco}/lib";
 
-          LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";
+          libpath = lib.concat buildInputs [fontconfig.lib sqlite.out];
+
+          LD_LIBRARY_PATH = "${lib.makeLibraryPath libpath}";
+          GSETTINGS_SCHEMA_DIR="${pkgs.gtk3}/share/gsettings-schemas/gtk+3-3.24.41/glib-2.0/schemas/";
+
         };
 
         packages.default = pkgs.rustPlatform.buildRustPackage rec {
