@@ -34,18 +34,32 @@
         "type": "github"
       }
     },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1781577229,
+        "narHash": "sha256-lrp67w8AulE9Ks53n27I45ADSzbOCn4H+CNW1Ck8B+8=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "robotics-scripts": {
       "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
+        "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1782434962,
-        "narHash": "sha256-hmB107QtBM5c2C6Efq8zhbiFiSsSK1jCkshXESH2IaQ=",
+        "lastModified": 1782436550,
+        "narHash": "sha256-eAXTcr4Rip9j0YcprHtxe8AjK4cII4ACFTK6g8UGHoI=",
         "owner": "dragonblade316",
         "repo": "robotics-scripts",
-        "rev": "c2dda3855f30cdfe866d9b0b29297168dbba2ae9",
+        "rev": "7b7f5a9877678b3cc10c63c72deeac4f7493f5a3",
         "type": "github"
       },
       "original": {

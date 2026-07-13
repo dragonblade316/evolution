@@ -1,0 +1,9 @@
+[package]
+name = "field_oriented_diff_drive"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cu29 = { workspace = true }
+pid = { workspace = true }
+common = { workspace = true }

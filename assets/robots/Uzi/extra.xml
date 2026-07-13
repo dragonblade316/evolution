@@ -1,0 +1,5 @@
+<visual>
+  <global offwidth="1920" offheight="1080"/>
+</visual>
+
+<option timestep="0.00009"/>

@@ -1,0 +1,16 @@
+[package]
+name = "iekflocalizer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+common = { workspace = true }
+cu29 = { workspace = true }
+cu-spatial-payloads = { workspace = true }
+cu-sensor-payloads = { workspace = true }
+cu-apriltag = { workspace = true }
+kalman_filters = { workspace = true }
+kfilter = { workspace = true }
+nalgebra = { workspace = true }
+ordered-float = { workspace = true }
+sophus = { workspace = true }

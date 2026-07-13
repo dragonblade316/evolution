@@ -25,12 +25,12 @@ impl CuTask for DiffDriveKinematics {
         const DEFAULT_TRACKWIDTH: f32 = 0.02;
 
         let wheel_radius = match config {
-            Some(cfg) => Length::new::<meter>(cfg.get::<>("wheel_radius")?.unwrap_or(DEFAULT_WHEEL_RADIUS_METERS)),
+            Some(cfg) => Length::new::<meter>(cfg.get::<f32>("wheel_radius")?.unwrap_or(DEFAULT_WHEEL_RADIUS_METERS)),
             None => Length::new::<meter>(DEFAULT_WHEEL_RADIUS_METERS)
         };
 
         let trackwidth = match config {
-            Some(cfg) => Length::new::<meter>(cfg.get::<ordered_float::Float>("trackwidth")?.unwrap_or(DEFAULT_WHEEL_RADIUS_METERS)),
+            Some(cfg) => Length::new::<meter>(cfg.get::<f32>("trackwidth")?.unwrap_or(DEFAULT_WHEEL_RADIUS_METERS)),
             None => Length::new::<meter>(DEFAULT_WHEEL_RADIUS_METERS)
         };
 

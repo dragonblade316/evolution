@@ -1,0 +1,41 @@
+{
+  "url": "https://cad.onshape.com/documents/493f7a48c35a1d59a50cfb20/w/55c694062f39b1c3e28aa8cb/e/406972864deb700fec8e68df",
+  "outputFormat": "urdf",
+
+  "robotName": "Uzi",
+  "additional_xml": "extra.xml",
+
+  "ignore": {},
+
+  "geom_properties": {
+    "front*_wheel": {
+      "collision": {
+        "type": "sphere",
+        "size": "0.0256",
+        "friction": "0 0.0 0.0",
+        "pos": "0 0 0"
+      }
+    },
+    "back*_wheel": {
+      "collision": {
+        "type": "sphere",
+        "size": "0.0256",
+        "pos": "0 0 0"
+      }
+    }
+  },
+
+  "joint_properties": {
+    "leftdrive_continuous": {
+      "actuated": true,
+      "type": "velocity"
+    },
+    "rightdrive_continuous": {
+      "actuated": true,
+      "type": "velocity"
+    },
+    "default": {
+      "kv": 10
+    }
+  }
+}

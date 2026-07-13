@@ -1,9 +1,12 @@
-use bincode::{Decode, Encode};
+use cu29::bincode::{Decode, Encode};
 use cu29::units::si::angular_velocity::radian_per_second;
 use cu29::units::si::f32::*;
+use cu29::units::si::f32::Torque;
 use cu29::{reflect::Reflect, units::si::velocity::meter_per_second};
 use serde::{Deserialize, Serialize};
 
+
+//kinematics
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
 pub struct ChassisSpeeds {
     pub x: Velocity,
@@ -36,4 +39,39 @@ impl Default for DiffDriveSpeeds {
     }
 }
 
+//motors
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
+pub enum MotorCMD {
+    Position(
+        Angle,
+        Option<AngularVelocity>,
+        Option<AngularAcceleration>,
+    ),
+    Velocity(AngularVelocity, Option<AngularAcceleration>),
+    Acceleration(AngularAcceleration, Option<Torque>),
+    Torque(Torque),
 
+    Stop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
+pub struct MotorData {
+    pub pos: Angle,
+    pub vel: AngularVelocity,
+    pub accel: Option<AngularAcceleration>,
+    pub torque: Option<Torque>,
+}
+
+//DS
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
+pub enum Allience {
+    RED,
+    BLUE,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
+pub enum DSStatus {
+    DISCONNECTED,
+    DISABLED(Allience),
+    ENABLED(Allience),
+}

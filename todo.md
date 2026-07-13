@@ -1,0 +1,10 @@
+- [x] Moteus driver
+- [ ] Servo driver
+- [ ] IMU driver (maybe, depends on imu)
+- [ ] LED driver
+- [ ] Driver station
+- [x] Odometry
+- [ ] iekf localization (mostly done)
+- [ ] Simulation
+- [ ] Shoot on the move solver
+- [ ] Rerun log visualization (with urdf)

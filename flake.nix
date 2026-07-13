@@ -4,7 +4,7 @@
     nixpkgs.url = "github:nixos/nixpkgs?ref=release-25.11";
     robotics-scripts = {
       url = "github:dragonblade316/robotics-scripts";
-      inputs.nixpkgs.follows = "nixpkgs";
+      # inputs.nixpkgs.follows = "nixpkgs";
     };
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -28,6 +28,7 @@
       };
       onshape-to-robot = robotics-scripts.packages.${system}.onshape-to-robot;
       moteus_gui = robotics-scripts.packages.${system}.moteus-gui;
+      moteus = robotics-scripts.packages.${system}.moteus;
       rust = pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.default);
     in
       with pkgs; rec {
@@ -67,6 +68,7 @@
             xorg.libX11
             onshape-to-robot
             moteus_gui
+            moteus
 
             #for bevy
             alsa-lib
@@ -78,6 +80,9 @@
             gtk3
             cmake
             ninja
+
+            libsoup_3
+            webkitgtk_4_1
 
             #things for shotcal
             (pkgs.python3.withPackages (ps: with ps; [

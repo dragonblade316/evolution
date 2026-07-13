@@ -1,0 +1,9 @@
+[package]
+name = "moteus_tasks"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cu29 = { workspace = true }
+common = { workspace = true }
+moteus_bridge = { workspace = true }

@@ -1,0 +1,11 @@
+[package]
+name = "sotm_rt"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cu29.workspace = true
+cu-spatial-payloads.workspace = true
+common.workspace = true
+ivp = "0.6.0"
+eqsolver = "0.4.1"

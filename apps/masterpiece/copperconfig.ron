@@ -1,28 +1,54 @@
 (
     tasks: [
         (
-            id: "src",
-            type: "tasks::MySource",
+            id: "telemetry",
+            type: "moteus_tasks::MoteusTelemetry",
+            run_in_sim: true,
         ),
+    ],
+    bridges: [
         (
-            id: "t-0",
-            type: "tasks::MyTask",
-        ),
-        (
-            id: "sink",
-            type: "tasks::MySink",
+            id: "moteus",
+            type: "moteus_bridge::MoteusBridge<moteus_bridge::MoteusTxChannels, moteus_bridge::MoteusRxChannels>",
+            run_in_sim: false,
+            channels: [
+                Tx(
+                    id: "command_left",
+                    msg: "moteus_bridge::messages::MoteusCMD",
+                    config: { "can_id": "1" },
+                    route: "moteus/1/cmd",
+                ),
+                Tx(
+                    id: "command_right",
+                    msg: "moteus_bridge::messages::MoteusCMD",
+                    config: { "can_id": "2" },
+                    route: "moteus/2/cmd",
+                ),
+                Rx(
+                    id: "status_left",
+                    msg: "moteus_bridge::messages::MoteusData",
+                    config: { "can_id": "1" },
+                    route: "moteus/1/data",
+                ),
+                Rx(
+                    id: "status_right",
+                    msg: "moteus_bridge::messages::MoteusData",
+                    config: { "can_id": "2" },
+                    route: "moteus/2/data",
+                ),
+            ],
         ),
     ],
     cnx: [
         (
-            src: "src",
-            dst: "t-0",
-            msg: "crate::messages::MyPayload",
+            src: "moteus/status_left",
+            dst: "telemetry",
+            msg: "moteus_bridge::messages::MoteusData",
         ),
         (
-            src: "t-0",
-            dst: "sink",
-            msg: "crate::messages::MyPayload",
+            src: "moteus/status_right",
+            dst: "telemetry",
+            msg: "moteus_bridge::messages::MoteusData",
         ),
     ],
 )
