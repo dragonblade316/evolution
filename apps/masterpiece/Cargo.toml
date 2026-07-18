@@ -36,11 +36,12 @@ rapier2d = { workspace = true }
 glam = { workspace = true }
 common = { workspace = true }
 
-moteus_bridge = { workspace = true }
-oakd_lite_source = { workspace = true }
+# moteus_bridge = { workspace = true }
+# oakd_lite_source = { workspace = true }
 accel_limiter = { workspace = true }
 diffdrive = { workspace = true }
 diffdrive_odometry = { workspace = true }
 field_oriented_diff_drive = { workspace = true }
 iekflocalizer = { workspace = true }
 moteus_tasks = { workspace = true }
+evosim = { workspace = true }

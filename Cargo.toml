@@ -5,7 +5,7 @@ members = [
     "components/bridges/moteus_bridge", "components/tasks/diffdrive",
     "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/accel_limiter",
     "components/tasks/diffdrive_odometry"
-, "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evodo_dioxus"]
+, "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evodo_dioxus", "external/evosim"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -25,6 +25,7 @@ sophus = "0.15.0"
 moteus = "0.5.3"
 rapier2d = "0.33.0"
 glam = "0.33.2"
+bincode = { version = "2.0", package = "cu-bincode", default-features = false, features = ["derive", "alloc"] }
 #internal deps
 common = { path = "./components/payloads/common/" }
 
@@ -36,3 +37,4 @@ diffdrive_odometry = { path = "./components/tasks/diffdrive_odometry/" }
 field_oriented_diff_drive = { path = "./components/tasks/field_oriented_diff_drive/" }
 iekflocalizer = { path = "./components/tasks/iekflocalizer/" }
 moteus_tasks = { path = "./components/tasks/moteus_tasks/" }
+evosim = { path = "./external/evosim/" }

@@ -1,54 +1,19 @@
 (
     tasks: [
         (
-            id: "telemetry",
-            type: "moteus_tasks::MoteusTelemetry",
-            run_in_sim: true,
+            id: "diffdrive_odom",
+            type: "diffdrive_odometry::DiffDriveOdometry",
         ),
-    ],
-    bridges: [
         (
-            id: "moteus",
-            type: "moteus_bridge::MoteusBridge<moteus_bridge::MoteusTxChannels, moteus_bridge::MoteusRxChannels>",
-            run_in_sim: false,
-            channels: [
-                Tx(
-                    id: "command_left",
-                    msg: "moteus_bridge::messages::MoteusCMD",
-                    config: { "can_id": "1" },
-                    route: "moteus/1/cmd",
-                ),
-                Tx(
-                    id: "command_right",
-                    msg: "moteus_bridge::messages::MoteusCMD",
-                    config: { "can_id": "2" },
-                    route: "moteus/2/cmd",
-                ),
-                Rx(
-                    id: "status_left",
-                    msg: "moteus_bridge::messages::MoteusData",
-                    config: { "can_id": "1" },
-                    route: "moteus/1/data",
-                ),
-                Rx(
-                    id: "status_right",
-                    msg: "moteus_bridge::messages::MoteusData",
-                    config: { "can_id": "2" },
-                    route: "moteus/2/data",
-                ),
-            ],
+            id: "iekf",
+            type: "iekflocalizer::IEKF",
         ),
     ],
     cnx: [
         (
-            src: "moteus/status_left",
-            dst: "telemetry",
-            msg: "moteus_bridge::messages::MoteusData",
-        ),
-        (
-            src: "moteus/status_right",
-            dst: "telemetry",
-            msg: "moteus_bridge::messages::MoteusData",
+            src: "diffdrive_odom",
+            dst: "iekf",
+            msg: "common::ChassisSpeeds",
         ),
     ],
 )

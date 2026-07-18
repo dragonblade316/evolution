@@ -111,7 +111,7 @@ impl CuTask for SOTM {
 
     type Output<'m> = output_msg!((f64, f64));
 
-    type Resources<'r>;
+    type Resources<'r> = ();
 
     fn new(config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
     where

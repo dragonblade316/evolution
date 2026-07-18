@@ -7,3 +7,4 @@ edition = "2024"
 cu29 = { workspace = true }
 cu29-export = { workspace = true, optional = true }
 serde = { workspace = true }
+bincode = { version = "2.0", package = "cu-bincode", default-features = false, features = ["derive", "alloc"] }

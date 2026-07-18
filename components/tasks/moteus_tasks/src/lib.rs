@@ -1,128 +1,41 @@
-use common::{DiffDriveSpeeds, MotorCMD, MotorData};
+use common::DiffDriveSpeeds;
 use cu29::{
     config::ComponentConfig,
     cutask::{CuMsg, CuTask, Freezable},
     input_msg, output_msg,
-    CuError, CuResult,
+    CuResult,
 };
-use moteus_bridge::messages::{MoteusCMD, MoteusData};
-
+use moteus_bridge::messages::MoteusData;
 
 // ---------------------------------------------------------------------------
-// MoteusDiff — DiffDriveSpeeds → MoteusCMD (per-motor commands)
+// MoteusDiff — per-motor MoteusData → DiffDriveSpeeds
 // ---------------------------------------------------------------------------
 
-/// Converts diff-drive wheel speeds into per-motor CAN commands.
+/// Collects individual motor telemetry and produces diff-drive wheel speeds.
 ///
 /// Config keys:
-///   left_can_id   — CAN ID of the left wheel motor   (default: "1")
-///   right_can_id  — CAN ID of the right wheel motor  (default: "2")
-///   max_torque    — optional torque limit (Nm)        (default: none)
+///   wheel_radius — wheel radius in meters (default: 0.05)
 pub struct MoteusDiff {
-    left_can_id: u8,
-    right_can_id: u8,
-    max_torque: Option<f32>,
+    #[allow(dead_code)]
+    wheel_radius: f32,
 }
 
 impl Freezable for MoteusDiff {}
 
 impl CuTask for MoteusDiff {
-    type Input<'m> = input_msg!(DiffDriveSpeeds);
-    type Output<'m> = output_msg!(MoteusCMD, MoteusCMD);
-    type Resources<'r> = ();
-
-    fn new(
-        config: Option<&ComponentConfig>,
-        _resources: Self::Resources<'_>,
-    ) -> CuResult<Self>
-    where
-        Self: Sized,
-    {
-        let left_can_id: u8 = match config {
-            Some(cfg) => cfg
-                .get::<String>("left_can_id")?
-                .unwrap_or_else(|| "1".to_string())
-                .parse()
-                .map_err(|_| CuError::from("Invalid left_can_id"))?,
-            None => 1,
-        };
-
-        let right_can_id: u8 = match config {
-            Some(cfg) => cfg
-                .get::<String>("right_can_id")?
-                .unwrap_or_else(|| "2".to_string())
-                .parse()
-                .map_err(|_| CuError::from("Invalid right_can_id"))?,
-            None => 2,
-        };
-
-        let max_torque: Option<f32> = match config {
-            Some(cfg) => cfg
-                .get::<String>("max_torque")?
-                .map(|s| {
-                    s.parse()
-                        .map_err(|_| CuError::from("Invalid max_torque"))
-                })
-                .transpose()?,
-            None => None,
-        };
-
-        Ok(Self {
-            left_can_id,
-            right_can_id,
-            max_torque,
-        })
-    }
-
-    fn process(
-        &mut self,
-        _ctx: &cu29::prelude::CuContext,
-        input: &Self::Input<'_>,
-        output: &mut Self::Output<'_>,
-    ) -> CuResult<()> {
-        if let Some(speeds) = input.payload() {
-            let (left_out, right_out) = output;
-
-            left_out.set_payload(MoteusCMD {
-                can_id: self.left_can_id,
-                cmd: MotorCMD::Velocity(speeds.left, None),
-            });
-
-            right_out.set_payload(MoteusCMD {
-                can_id: self.right_can_id,
-                cmd: MotorCMD::Velocity(speeds.right, None),
-            });
-        }
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MoteusTelemetry — MoteusData + MoteusData → DiffDriveSpeeds
-// ---------------------------------------------------------------------------
-
-/// Extracts left/right wheel velocities from motor telemetry.
-///
-/// Takes one status message from each wheel channel and extracts their
-/// velocities. The channel paths identify the motors, so no CAN-ID lookup is
-/// needed in this task.
-pub struct MoteusTelemetry;
-
-impl Freezable for MoteusTelemetry {}
-
-impl CuTask for MoteusTelemetry {
-    type Input<'m> = input_msg!(MoteusData, MoteusData);
+    type Input<'m> = input_msg!('m, MoteusData, MoteusData);
     type Output<'m> = output_msg!(DiffDriveSpeeds);
     type Resources<'r> = ();
 
-    fn new(
-        _config: Option<&ComponentConfig>,
-        _resources: Self::Resources<'_>,
-    ) -> CuResult<Self>
+    fn new(config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
     where
         Self: Sized,
     {
-        Ok(Self)
+        let wheel_radius = match config {
+            Some(cfg) => cfg.get::<f32>("wheel_radius")?.unwrap_or(0.05),
+            None => 0.05,
+        };
+        Ok(Self { wheel_radius })
     }
 
     fn process(
