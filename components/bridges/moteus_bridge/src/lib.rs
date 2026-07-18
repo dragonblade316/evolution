@@ -1,10 +1,12 @@
 pub mod messages;
 
 use std::collections::HashMap;
+use std::f32;
 use std::sync::{Arc, Mutex};
 
-use cu29::units::si::angle::{revolution};
-use cu29::units::si::angular_velocity::{revolution_per_second};
+use common::MotorCMD;
+use cu29::units::si::angle::{radian, revolution};
+use cu29::units::si::angular_velocity::{radian_per_second, revolution_per_second};
 use cu29::units::si::f32::{Angle, AngularVelocity};
 use cu29::units::si::torque::newton_meter;
 use cu29::units::si::f32::Torque;
@@ -14,20 +16,22 @@ use cu29::{
     prelude::{BridgeChannel, BridgeChannelConfig, BridgeChannelSet, CuBridge, CuContext},
     CuResult,
 };
-pub use messages::SharedBridgePayload;
 use moteus::Transport;
+use moteus::command::PositionCommand;
 use moteus::transport::Router;
 use moteus::{BlockingController, transport::singleton::get_singleton_transport};
 use cu29::prelude::*;
 use messages::*;
 
+#[derive(Debug)]
 struct MoteusMotor {
     ctrl: BlockingController<Arc<Mutex<Router>>>
 }
 
 struct MoteusChannelConfig<Id: Copy> {
     id: Id,
-    can_id: usize
+    can_id: usize,
+    motor: MoteusMotor
 }
 
 pub struct MoteusBridge<Tx, Rx>
@@ -38,10 +42,31 @@ where
     Rx::Id: Send + Sync + 'static
 
 {
-    motors: HashMap<u8, MoteusMotor>,
     tx_channels: Vec<MoteusChannelConfig<Tx::Id>>,
     rx_channels: Vec<MoteusChannelConfig<Rx::Id>>
 }
+
+impl<Tx, Rx> MoteusBridge<Tx, Rx>
+where
+    Tx: BridgeChannelSet + 'static,
+    Rx: BridgeChannelSet + 'static,
+    Tx::Id: Send + Sync + 'static,
+    Rx::Id: Send + Sync + 'static,
+{
+    fn cmd(pos: Option<Angle>, vel: Option<AngularVelocity>, torque: Option<Torque>) -> PositionCommand {
+        PositionCommand::new()
+            .position(match pos {
+                Some(a) => a.get::<radian>(),
+                None => f32::NAN
+            })
+            .velocity(match vel {
+                Some(a) => a.get::<radian_per_second>(),
+                None => f32::NAN
+            })
+    }
+}
+
+
 
 impl<Tx, Rx> Freezable for MoteusBridge<Tx, Rx>
 where
@@ -51,7 +76,7 @@ where
     Rx::Id: Send + Sync + 'static,
 {}
 
-impl CuBridge for MoteusBridge<Tx, Rx>
+impl<Tx, Rx> CuBridge for MoteusBridge<Tx, Rx>
     where
         Tx: BridgeChannelSet + 'static,
         Rx: BridgeChannelSet + 'static,
@@ -72,6 +97,9 @@ impl CuBridge for MoteusBridge<Tx, Rx>
     where
         Self: Sized,
     {
+
+
+        let transport = get_singleton_transport(None).map_err(|e| CuError::new_with_cause("Failed to get moteus transport", e))?;
         let tx_channels: Vec<MoteusChannelConfig<<Self::Tx as BridgeChannelSet>::Id>> = tx_channels
             .iter()
             .map(|channel| {
@@ -86,11 +114,14 @@ impl CuBridge for MoteusBridge<Tx, Rx>
                 Ok(MoteusChannelConfig {
                     id: channel.channel.id,
                     can_id,
+                    motor: MoteusMotor {
+                        ctrl: BlockingController::with_transport(can_id as u8, transport.clone()),
+                    },
                 })
             })
             .collect::<CuResult<Vec<_>>>()?;
 
-        let rx_channels: Vec<MoteusChannelConfig<Rx::Id> = rx_channels
+        let rx_channels: Vec<MoteusChannelConfig<Rx::Id>> = rx_channels
             .iter()
             .map(|channel| {
                 let can_id = channel
@@ -104,34 +135,16 @@ impl CuBridge for MoteusBridge<Tx, Rx>
                 Ok(MoteusChannelConfig {
                     id: channel.channel.id,
                     can_id,
+                    motor: MoteusMotor {
+                        ctrl: BlockingController::with_transport(can_id as u8, transport.clone()),
+                    },
                 })
             })
             .collect::<CuResult<Vec<_>>>()?;
 
-        let mut can_ids = tx_channels
-            .iter()
-            .chain(rx_channels.iter())
-            .map(|channel| channel.can_id as u8)
-            .collect::<Vec<_>>();
-        can_ids.sort_unstable();
-        can_ids.dedup();
-
-        let transport = get_singleton_transport(None)
-            .map_err(|e| CuError::new_with_cause("Failed to get moteus transport", e))?;
-        let motors = can_ids
-            .into_iter()
-            .map(|can_id| {
-                (
-                    can_id,
-                    MoteusMotor {
-                        ctrl: BlockingController::with_transport(can_id, transport.clone()),
-                    },
-                )
-            })
-            .collect();
+        let transport = get_singleton_transport(None).map_err(|e| CuError::new_with_cause("Failed to get moteus transport", e))?;
 
         Ok(MoteusBridge::<Tx, Rx> {
-            motors,
             tx_channels,
             rx_channels,
         })
@@ -146,20 +159,25 @@ impl CuBridge for MoteusBridge<Tx, Rx>
     where
         Payload: CuMsgPayload + 'a,
     {
-        let command = msg.downcast_ref::<MoteusCMD>()?;
         let channel_config = self
-            .tx_channels
-            .iter()
-            .find(|configured| configured.id == channel.id)
-            .ok_or_else(|| CuError::from("Moteus command channel is not configured"))?;
-        if command.can_id as usize != channel_config.can_id {
-            return Err(CuError::from(format!(
-                "Moteus command CAN ID {} does not match channel CAN ID {}",
-                command.can_id, channel_config.can_id
-            )));
-        }
+                    .tx_channels
+                    .iter_mut()
+                    .find(|configured| configured.id == channel.id)
+                    .ok_or_else(|| CuError::from("Moteus status channel is not configured"))?;
 
-        // Hardware command encoding remains in the existing Moteus integration.
+        let cmd_msg: &CuMsg<MotorCMD> = msg.downcast_ref()?;
+        if let Some(cmd) = cmd_msg.payload() {
+            let cmd = match cmd {
+                MotorCMD::Position(pos, vel, torque) => Self::cmd(Some(*pos), *vel, *torque),
+                MotorCMD::Velocity(vel, torque) => Self::cmd(None, Some(*vel), *torque),
+                MotorCMD::Torque(torque) => return Err(CuError::from("Torque commands are not supported by bridge")),
+                MotorCMD::Stop => {
+                    let _ = channel_config.motor.ctrl.set_stop();
+                    return Ok(());
+                }
+            };
+            channel_config.motor.ctrl.set_position(cmd);
+        }
         Ok(())
     }
 
@@ -178,14 +196,8 @@ impl CuBridge for MoteusBridge<Tx, Rx>
             .find(|configured| configured.id == channel.id)
             .ok_or_else(|| CuError::from("Moteus status channel is not configured"))?;
         let can_id = channel_config.can_id as u8;
-        let motor = self
-            .motors
-            .get_mut(&can_id)
-            .ok_or_else(|| CuError::from("Moteus status channel has no configured motor"))?;
-        let result = motor
-            .ctrl
-            .query()
-            .map_err(|e| CuError::from(format!("moteus query error on {can_id}: {e:?}")))?;
+
+        let result = channel_config.motor.ctrl.query()?;
 
         msg.downcast_mut()?.set_payload(messages::MoteusData {
             canid: can_id,
@@ -203,8 +215,9 @@ impl CuBridge for MoteusBridge<Tx, Rx>
     }
 
     fn stop(&mut self, _ctx: &CuContext) -> CuResult<()> {
-        for motor in self.motors.values_mut() {
-            let _ = motor.ctrl.set_stop();
+        //motors registered to tx channels are the only ones that should ever be moving.
+        for c in self.tx_channels.iter_mut() {
+            let _ = c.motor.ctrl.set_stop();
         }
         Ok(())
     }

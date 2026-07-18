@@ -45,13 +45,19 @@ pub enum MotorCMD {
     Position(
         Angle,
         Option<AngularVelocity>,
-        Option<AngularAcceleration>,
+        Option<Torque>,
     ),
-    Velocity(AngularVelocity, Option<AngularAcceleration>),
-    Acceleration(AngularAcceleration, Option<Torque>),
+    Velocity(AngularVelocity, Option<Torque>),
+    // Acceleration(AngularAcceleration, Option<Torque>),
     Torque(Torque),
 
     Stop,
+}
+
+impl Default for MotorCMD {
+    fn default() -> Self {
+        Self::Stop
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
@@ -60,6 +66,17 @@ pub struct MotorData {
     pub vel: AngularVelocity,
     pub accel: Option<AngularAcceleration>,
     pub torque: Option<Torque>,
+}
+
+impl Default for MotorData {
+    fn default() -> Self {
+        Self {
+            pos: Angle::default(),
+            vel: AngularVelocity::default(),
+            accel: None,
+            torque: None,
+        }
+    }
 }
 
 //DS

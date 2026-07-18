@@ -8,3 +8,4 @@ cu29 = { workspace = true }
 serde = { workspace = true }
 common = { workspace = true }
 moteus = { workspace = true }
+bincode = { version = "2.0", package = "cu-bincode", default-features = false, features = ["derive", "alloc"] }
