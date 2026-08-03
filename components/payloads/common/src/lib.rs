@@ -26,21 +26,21 @@ impl Default for ChassisSpeeds {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
 pub struct DiffDriveSpeeds {
-    pub left: AngularVelocity,
-    pub right: AngularVelocity,
+    pub left: Velocity,
+    pub right: Velocity,
 }
 
 impl Default for DiffDriveSpeeds {
     fn default() -> Self {
         Self {
-            left: AngularVelocity::new::<radian_per_second>(0.0),
-            right: AngularVelocity::new::<radian_per_second>(0.0),
+            left: Velocity::new::<meter_per_second>(0.0),
+            right: Velocity::new::<meter_per_second>(0.0),
         }
     }
 }
 
 //motors
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, Reflect)]
 pub enum MotorCMD {
     Position(
         Angle,
@@ -48,7 +48,6 @@ pub enum MotorCMD {
         Option<Torque>,
     ),
     Velocity(AngularVelocity, Option<Torque>),
-    // Acceleration(AngularAcceleration, Option<Torque>),
     Torque(Torque),
 
     Stop,
@@ -91,4 +90,31 @@ pub enum DSStatus {
     DISCONNECTED,
     DISABLED(Allience),
     ENABLED(Allience),
+}
+
+/// Snapshot of a gamepad's state, intended as a copper-rs payload.
+///
+/// NOTE: menu buttons (Start / Select / Home) and stick buttons (LS / RS)
+/// are intentionally omitted — they are not currently needed.
+#[derive(Debug, Clone, Default, Encode, Decode, Serialize, Deserialize, Reflect)]
+pub struct GamePadState {
+    pub left_x: f32,
+    pub left_y: f32,
+    pub right_x: f32,
+    pub right_y: f32,
+    pub right_trigger: f32,
+    pub left_trigger: f32,
+
+    pub left_shoulder: bool,
+    pub right_shoulder: bool,
+
+    pub a: bool,
+    pub x: bool,
+    pub y: bool,
+    pub b: bool,
+
+    pub d_up: bool,
+    pub d_right: bool,
+    pub d_left: bool,
+    pub d_down: bool,
 }

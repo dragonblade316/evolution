@@ -3,11 +3,11 @@ use cu29::{
     config::ComponentConfig,
     cutask::{CuMsg, CuTask, Freezable},
     input_msg, output_msg,
-    CuError, CuResult,
+    CuResult,
 };
 use cu_spatial_payloads::Pose;
 
-use std::{f64::consts::PI, time::{Duration, Instant}};
+use std::f64::consts::PI;
 use eqsolver::nalgebra::DVector;
 use ivp::prelude::*;
 
@@ -30,14 +30,15 @@ impl SOTM {
 
     ///qt: The position of the target relative to the robot. [x, y] (typically only x will change since it is the distance of the robot from the goal)
     ///vcx: the velocity that the robot is moving toward the goal.
-    ///Returns: [velocity_out, tof]
-    fn solve_range(qt: [f64; 2], vcx: f64) -> [f64; 2] {
-
+    ///angle_deg: launch (hood) angle above the horizontal, in degrees.
+    ///Returns: Some([velocity_out, tof]) on convergence, or None if the shot is
+    ///unsolvable for the given angle/distance (e.g. too close to the goal).
+    fn solve_range(qt: [f64; 2], vcx: f64, angle_deg: f64) -> Option<[f64; 2]> {
         let q0 = [0.0,0.0];
 
         let target_objective = |guess: DVector<f64>| {
-            let vx = guess[0] * f64::cos(60.0 * (PI/180.0));
-            let vy = guess[0] * f64::sin(60.0 * (PI/180.0));
+            let vx = guess[0] * f64::cos(angle_deg * (PI/180.0));
+            let vy = guess[0] * f64::sin(angle_deg * (PI/180.0));
             let tof = guess[1];
 
             let v0 = [vx+vcx, vy];
@@ -60,14 +61,8 @@ impl SOTM {
         };
 
         let solver = eqsolver::multivariable::GaussNewtonFD::new(target_objective);
-        let start = Instant::now();
-        let sol = solver.solve(DVector::from_vec(vec![1.0, 1.0])).unwrap();
-        let dur = start.elapsed();
-
-        // println!("Time elapsed: {:?}", dur);
-        // println!("vi: {}", sol[0]);
-        // println!("tof: {}", sol[1]);
-        return [sol[0], sol[1]];
+        let sol = solver.solve(DVector::from_vec(vec![1.0, 1.0])).ok()?;
+        Some([sol[0], sol[1]])
     }
 
     ///v: Lateral velocity of the robot relative to the goal
@@ -92,10 +87,10 @@ impl SOTM {
         let angle_front_to_goal = goal_direction - heading;
 
         let qt = [dist_to_goal, dz];
-        let [velocity, tof] = Self::solve_range(qt, v_parallel);
+        let [_velocity, tof] = Self::solve_range(qt, v_parallel, 60.0).unwrap();
         let (theta, r) = Self::solve_angle(v_perpendicular, dist_to_goal, tof);
         let qt = [r, dz];
-        let [velocity_out, _] = Self::solve_range(qt, v_parallel);
+        let [velocity_out, _] = Self::solve_range(qt, v_parallel, 60.0).unwrap();
 
         let turret_angle = angle_front_to_goal + theta;
         (turret_angle, velocity_out)
@@ -136,7 +131,7 @@ impl CuTask for SOTM {
         input: &Self::Input<'_>,
         output: &mut Self::Output<'_>,
     ) -> CuResult<()> {
-        let input_msg = *input;
+        let input_msg = input;
         let (robot_pose, robot_speeds) = match input_msg.payload() {
             Some(p) => p,
             None => return Ok(()),
@@ -204,4 +199,27 @@ impl CuTask for SOTM {
 
         Ok(())
     }
+}
+
+/// Public analysis API used by the `angleseek` binary.
+///
+/// For a static shooter (no robot motion) the lateral-correction pass in
+/// `SOTM::solve` is a no-op (`v_perpendicular = 0` ⇒ `theta = 0`, `r = x`),
+/// so the muzzle velocity for a given `(distance, dz, hood_angle)` reduces to
+/// a single `solve_range` call. This wrapper exposes that directly.
+///
+/// `max_velocity` is the physically plausible ceiling (m/s). Solutions above
+/// this — or below `MIN_VELOCITY` — are treated as unsolvable, which happens
+/// near the singularity where the solver converges on absurd values.
+const MIN_VELOCITY: f64 = 0.1;
+
+pub fn solve_muzzle_velocity(
+    distance: f64,
+    dz: f64,
+    hood_angle_deg: f64,
+    max_velocity: f64,
+) -> Option<f64> {
+    SOTM::solve_range([distance, dz], 0.0, hood_angle_deg)
+        .map(|[v, _]| v)
+        .filter(|&v| v >= MIN_VELOCITY && v <= max_velocity)
 }

@@ -1,0 +1,52 @@
+(
+    tasks: [
+        (
+            id: "joy",
+            type: "Joy::JoySource",
+        ),
+        (
+            id: "proto_vel",
+            type: "Prototyping::ProtoVelocityControl",
+            config: {
+                // peak stick deflection → 50 rpm
+                "max_vel": 3000.0,
+            },
+        ),
+    ],
+    bridges: [
+        (
+            id: "moteus",
+            type: "bridges::ProtoMoteusBridge",
+            channels: [
+                Tx(
+                    id: "motor",
+                    route: "moteus/motor/cmd",
+                    config: {
+                        "can_id": "1",
+                        "kp": 1.2,
+                        "kd": 0.0,
+                    },
+                ),
+                Rx(
+                    id: "motor",
+                    route: "moteus/motor/data",
+                    config: {
+                        "can_id": "1",
+                    },
+                ),
+            ],
+        )
+    ],
+    cnx: [
+        (
+            src: "joy",
+            dst: "proto_vel",
+            msg: "common::GamePadState",
+        ),
+        (
+            src: "proto_vel",
+            dst: "moteus/motor",
+            msg: "common::MotorCMD",
+        ),
+    ],
+)

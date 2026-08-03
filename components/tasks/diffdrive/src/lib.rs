@@ -1,23 +1,19 @@
 use core::f64;
 
-use common::{ChassisSpeeds, DiffDriveSpeeds, MotorCMD};
+use common::{ChassisSpeeds, DiffDriveSpeeds, GamePadState, MotorCMD};
 use cu29::{
-    config::ComponentConfig,
-    cutask::{CuMsg, CuTask, Freezable},
-    input_msg, output_msg,
-    units::si::{
+    CuResult, config::ComponentConfig, cutask::{CuMsg, CuTask, Freezable}, input_msg, output_msg, prelude::Reflect, units::si::{
         angular_velocity::radian_per_second,
-        f32::{AngularVelocity, Length},
-        length::meter,
-        velocity::meter_per_second,
-    },
-    CuResult,
+        f32::{AngularVelocity, Length, Velocity},
+        length::meter, velocity::meter_per_second,
+    }
 };
 
 // ---------------------------------------------------------------------------
 // DiffDriveKinematics — ChassisSpeeds → DiffDriveSpeeds
 // ---------------------------------------------------------------------------
 
+#[derive(Reflect)]
 pub struct DiffDriveKinematics {
     trackwidth: Length,
     wheel_radius: Length,
@@ -37,8 +33,8 @@ impl CuTask for DiffDriveKinematics {
     where
         Self: Sized,
     {
-        const DEFAULT_WHEEL_RADIUS_METERS: f32 = 0.02;
-        const DEFAULT_TRACKWIDTH: f32 = 0.02;
+        const DEFAULT_WHEEL_RADIUS_METERS: f32 = 0.1;
+        const DEFAULT_TRACKWIDTH: f32 = 0.3;
 
         let wheel_radius = match config {
             Some(cfg) => Length::new::<meter>(
@@ -51,9 +47,9 @@ impl CuTask for DiffDriveKinematics {
         let trackwidth = match config {
             Some(cfg) => Length::new::<meter>(
                 cfg.get::<f32>("trackwidth")?
-                    .unwrap_or(DEFAULT_WHEEL_RADIUS_METERS),
+                    .unwrap_or(DEFAULT_TRACKWIDTH),
             ),
-            None => Length::new::<meter>(DEFAULT_WHEEL_RADIUS_METERS),
+            None => Length::new::<meter>(DEFAULT_TRACKWIDTH),
         };
 
         Ok(Self {
@@ -73,13 +69,11 @@ impl CuTask for DiffDriveKinematics {
             None => return Ok(()),
         };
 
-        let left = AngularVelocity::new::<radian_per_second>(
-            (cmd.x.raw() - (cmd.theta.raw() * self.trackwidth.raw()) / 2.0)
-                / (self.wheel_radius.raw() * std::f32::consts::PI),
+        let left = Velocity::new::<meter_per_second>(
+            cmd.x.raw() - (cmd.theta.raw() * self.trackwidth.raw()) / 2.0,
         );
-        let right = AngularVelocity::new::<radian_per_second>(
-            (cmd.x.raw() + (cmd.theta.raw() * self.trackwidth.raw()) / 2.0)
-                / (self.wheel_radius.raw() * std::f32::consts::PI),
+        let right = Velocity::new::<meter_per_second>(
+            cmd.x.raw() + (cmd.theta.raw() * self.trackwidth.raw()) / 2.0,
         );
 
         output.set_payload(DiffDriveSpeeds { left, right });
@@ -94,27 +88,31 @@ impl CuTask for DiffDriveKinematics {
 /// Converts diff-drive wheel speeds into per-motor velocity commands.
 ///
 /// Config keys:
-///   wheel_radius — wheel radius in meters (default: 0.05)
+///   wheel_radius — wheel radius in meters (default: 0.1)
+#[derive(Reflect)]
 pub struct DiffDriveCmd {
     #[allow(dead_code)]
-    wheel_radius: f32,
+    wheel_radius: Length,
 }
 
 impl Freezable for DiffDriveCmd {}
 
+pub type LeftMotorCMD = MotorCMD;
+pub type RightMotorCMD = MotorCMD;
+
 impl CuTask for DiffDriveCmd {
     type Input<'m> = input_msg!(DiffDriveSpeeds);
-    type Output<'m> = output_msg!('m, MotorCMD, MotorCMD);
+    type Output<'m> = output_msg!('m, LeftMotorCMD, RightMotorCMD);
     type Resources<'r> = ();
 
     fn new(config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
     where
         Self: Sized,
     {
-        let wheel_radius = match config {
-            Some(cfg) => cfg.get::<f32>("wheel_radius")?.unwrap_or(0.05),
-            None => 0.05,
-        };
+        let wheel_radius = Length::new::<meter>(match config {
+            Some(cfg) => cfg.get::<f32>("wheel_radius")?.unwrap_or(0.1),
+            None => 0.1,
+        });
         Ok(Self { wheel_radius })
     }
 
@@ -126,9 +124,52 @@ impl CuTask for DiffDriveCmd {
     ) -> CuResult<()> {
         if let Some(speeds) = input.payload() {
             let (left_out, right_out) = output;
-            left_out.set_payload(MotorCMD::Velocity(speeds.left, None));
-            right_out.set_payload(MotorCMD::Velocity(speeds.right, None));
+
+            fn solve(v: Velocity, r: Length) -> AngularVelocity {
+                AngularVelocity::new::<radian_per_second>(v.get::<meter_per_second>() / r.get::<meter>())
+            }
+
+            left_out.set_payload(MotorCMD::Velocity(solve(speeds.left, self.wheel_radius), None));
+            right_out.set_payload(MotorCMD::Velocity(solve(speeds.right, self.wheel_radius), None));
         }
+        Ok(())
+    }
+}
+
+///This is a task that takes in joy any outputs
+#[derive(Reflect)]
+pub struct DiffDriveDoubleStick {
+    #[allow(dead_code)]
+    max_wheel_vel: f32,
+}
+
+impl Freezable for DiffDriveDoubleStick {}
+
+impl CuTask for DiffDriveDoubleStick {
+    type Input<'m> = input_msg!(GamePadState);
+    type Output<'m> = output_msg!(DiffDriveSpeeds);
+    type Resources<'r> = ();
+
+    fn new(config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
+    where
+        Self: Sized,
+    {
+        let max_wheel_vel = match config {
+            Some(cfg) => cfg.get::<f32>("max_wheel_vel")?.unwrap_or(1.0),
+            None => 1.0,
+        };
+        Ok(Self { max_wheel_vel })
+    }
+
+    fn process(
+        &mut self,
+        _ctx: &cu29::prelude::CuContext,
+        input: &Self::Input<'_>,
+        output: &mut Self::Output<'_>,
+    ) -> CuResult<()> {
+        let data = input.payload().unwrap();
+
+        output.set_payload(DiffDriveSpeeds { left: Velocity::new::<meter_per_second>(self.max_wheel_vel * data.left_y), right: Velocity::new::<meter_per_second>(self.max_wheel_vel * data.right_y)});
         Ok(())
     }
 }

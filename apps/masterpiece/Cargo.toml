@@ -35,8 +35,11 @@ serde = { workspace = true }
 rapier2d = { workspace = true }
 glam = { workspace = true }
 common = { workspace = true }
+cu-spatial-payloads = { workspace = true }
+bincode.workspace = true
 
-# moteus_bridge = { workspace = true }
+moteus_bridge = { workspace = true }
+Joy = { workspace = true }
 # oakd_lite_source = { workspace = true }
 accel_limiter = { workspace = true }
 diffdrive = { workspace = true }
@@ -44,4 +47,7 @@ diffdrive_odometry = { workspace = true }
 field_oriented_diff_drive = { workspace = true }
 iekflocalizer = { workspace = true }
 moteus_tasks = { workspace = true }
+cu-apriltag = { workspace = true }
+cu-logmon = { workspace = true }
 evosim = { workspace = true }
+rerun = { workspace = true }

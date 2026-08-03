@@ -1,4 +1,4 @@
-use bincode::{Decode, Encode};
+use cu29::bincode::{Decode, Encode};
 use cu29::prelude::*;
 use serde::{Deserialize, Serialize};
 

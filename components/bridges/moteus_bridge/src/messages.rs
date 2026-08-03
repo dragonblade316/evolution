@@ -1,8 +1,9 @@
 use cu29::bincode::{Decode, Encode};
+use cu29::reflect::Reflect;
 use moteus::Mode;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Reflect)]
 pub struct MoteusData {
     pub canid: u8,
     pub data: common::MotorData,

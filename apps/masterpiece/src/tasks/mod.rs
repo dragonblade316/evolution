@@ -1,8 +1,5 @@
-mod local_example_sink;
-mod local_example_src;
-mod local_example_task;
-mod state_machine;
-
-pub use local_example_sink::MySink;
-pub use local_example_src::MySource;
-pub use local_example_task::MyTask;
+// mod state_machine;
+pub mod pose_log_sink;
+pub use pose_log_sink::{PoseLogSink, SpeedsLogSink};
+pub mod apriltag_source;
+pub use apriltag_source::AprilTagSource;

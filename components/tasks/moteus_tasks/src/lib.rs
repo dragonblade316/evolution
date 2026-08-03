@@ -3,6 +3,13 @@ use cu29::{
     config::ComponentConfig,
     cutask::{CuMsg, CuTask, Freezable},
     input_msg, output_msg,
+    reflect::Reflect,
+    units::si::{
+        angular_velocity::radian_per_second,
+        f32::{Length, Velocity},
+        length::meter,
+        velocity::meter_per_second,
+    },
     CuResult,
 };
 use moteus_bridge::messages::MoteusData;
@@ -11,19 +18,22 @@ use moteus_bridge::messages::MoteusData;
 // MoteusDiff — per-motor MoteusData → DiffDriveSpeeds
 // ---------------------------------------------------------------------------
 
+type LeftMoteusData = MoteusData;
+type RightMoteusData = MoteusData;
+
 /// Collects individual motor telemetry and produces diff-drive wheel speeds.
 ///
 /// Config keys:
-///   wheel_radius — wheel radius in meters (default: 0.05)
+///   wheel_radius — wheel radius in meters (default: 0.1)
+#[derive(Reflect)]
 pub struct MoteusDiff {
-    #[allow(dead_code)]
-    wheel_radius: f32,
+    wheel_radius: Length,
 }
 
 impl Freezable for MoteusDiff {}
 
 impl CuTask for MoteusDiff {
-    type Input<'m> = input_msg!('m, MoteusData, MoteusData);
+    type Input<'m> = input_msg!('m, LeftMoteusData, RightMoteusData);
     type Output<'m> = output_msg!(DiffDriveSpeeds);
     type Resources<'r> = ();
 
@@ -31,10 +41,10 @@ impl CuTask for MoteusDiff {
     where
         Self: Sized,
     {
-        let wheel_radius = match config {
-            Some(cfg) => cfg.get::<f32>("wheel_radius")?.unwrap_or(0.05),
-            None => 0.05,
-        };
+        let wheel_radius = Length::new::<meter>(match config {
+            Some(cfg) => cfg.get::<f32>("wheel_radius")?.unwrap_or(0.1),
+            None => 0.1,
+        });
         Ok(Self { wheel_radius })
     }
 
@@ -49,9 +59,10 @@ impl CuTask for MoteusDiff {
             return Ok(());
         };
 
+        let r = self.wheel_radius.get::<meter>();
         output.set_payload(DiffDriveSpeeds {
-            left: left.data.vel,
-            right: right.data.vel,
+            left: Velocity::new::<meter_per_second>(left.data.vel.get::<radian_per_second>() * r),
+            right: Velocity::new::<meter_per_second>(right.data.vel.get::<radian_per_second>() * r),
         });
         Ok(())
     }

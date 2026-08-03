@@ -1,19 +1,188 @@
 (
     tasks: [
         (
-            id: "diffdrive_odom",
-            type: "diffdrive_odometry::DiffDriveOdometry",
+            id: "joy",
+            type: "Joy::JoySource",
+            run_in_sim: true,
         ),
         (
-            id: "iekf",
-            type: "iekflocalizer::IEKF",
+            id: "joytodrive",
+            type: "diffdrive::DiffDriveDoubleStick",
         ),
+
+
+
+        (
+            id: "pose_estimator",
+            type: "iekflocalizer::IEKFPoseEstimator"
+        ),
+        (
+            id: "apriltag",
+            type: "tasks::AprilTagSource",
+            run_in_sim: true,
+        ),
+        (
+            id: "poselog",
+            type: "tasks::PoseLogSink",
+            run_in_sim: true,
+        ),
+        (
+            id: "speedslog",
+            type: "tasks::SpeedsLogSink",
+            run_in_sim: true,
+        ),
+        (
+            id: "odom",
+            type: "diffdrive_odometry::DiffDriveOdometry"
+        ),
+        (
+            id: "diffdrivereader",
+            type: "moteus_tasks::MoteusDiff"
+        ),
+        (
+            id: "diffdrivecmd",
+            type: "diffdrive::DiffDriveCmd",
+        ),
+    ],
+    bridges: [
+        (
+            id: "moteus",
+            type: "bridges::UziMoteusBridge",
+            channels: [
+                Tx(
+                    id: "drive_left",
+                    route: "moteus/drive_left/cmd",
+                    config: {
+                        "can_id": "1",
+                    },
+                ),
+                Tx(
+                    id: "drive_right",
+                    route: "moteus/drive_right/cmd",
+                    config: {
+                        "can_id": "2",
+                    },
+                ),
+                Tx(
+                    id: "indexer",
+                    route: "moteus/indexer/cmd",
+                    config: {
+                        "can_id": "3",
+                    },
+                ),
+                Tx(
+                    id: "turret",
+                    route: "moteus/turret/cmd",
+                    config: {
+                        "can_id": "4",
+                    },
+                ),
+                Tx(
+                    id: "shooter",
+                    route: "moteus/shooter/cmd",
+                    config: {
+                        "can_id": "5",
+                    },
+                ),
+                Rx(
+                    id: "drive_left_data",
+                    route: "moteus/drive_left/data",
+                    config: {
+                        "can_id": "1",
+                    },
+                ),
+                Rx(
+                    id: "drive_right_data",
+                    route: "moteus/drive_right/data",
+                    config: {
+                        "can_id": "2",
+                    },
+                ),
+                Rx(
+                    id: "indexer_data",
+                    route: "moteus/indexer/data",
+                    config: {
+                        "can_id": "3",
+                    },
+                ),
+                Rx(
+                    id: "turret_data",
+                    route: "moteus/turret/data",
+                    config: {
+                        "can_id": "4",
+                    },
+                ),
+                Rx(
+                    id: "shooter_data",
+                    route: "moteus/shooter/data",
+                    config: {
+                        "can_id": "5",
+                    },
+                ),
+
+
+            ],
+            run_in_sim: false,
+        )
     ],
     cnx: [
         (
-            src: "diffdrive_odom",
-            dst: "iekf",
+            src: "joy",
+            dst: "joytodrive",
+            msg: "common::GamePadState",
+        ),
+        (
+            src: "joytodrive",
+            dst: "diffdrivecmd",
+            msg: "common::DiffDriveSpeeds",
+        ),
+        (
+            src: "diffdrivecmd",
+            dst: "moteus/drive_left",
+            msg: "diffdrive::LeftMotorCMD",
+        ),
+        (
+            src: "diffdrivecmd",
+            dst: "moteus/drive_right",
+            msg: "diffdrive::RightMotorCMD",
+        ),
+        (
+            src: "moteus/drive_left_data",
+            dst: "diffdrivereader",
+            msg: "moteus_bridge::messages::MoteusData",
+        ),
+        (
+            src: "moteus/drive_right_data",
+            dst: "diffdrivereader",
+            msg: "moteus_bridge::messages::MoteusData",
+        ),
+        (
+            src: "diffdrivereader",
+            dst: "odom",
+            msg: "common::DiffDriveSpeeds",
+        ),
+        (
+            src: "odom",
+            dst: "pose_estimator",
+            msg: "common::ChassisSpeeds",
+        ),
+        (
+            src: "apriltag",
+            dst: "pose_estimator",
+            msg: "cu_apriltag::AprilTagDetections",
+        ),
+        (
+            src: "pose_estimator",
+            dst: "poselog",
+            msg: "cu_spatial_payloads::Pose<f64>",
+        ),
+        (
+            src: "pose_estimator",
+            dst: "speedslog",
             msg: "common::ChassisSpeeds",
         ),
     ],
+    monitor: (
+      type: "cu_logmon::CuLogMon",
+    ),
 )

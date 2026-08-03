@@ -2,17 +2,22 @@
 members = [
     "apps/cu_example_app",
     "apps/masterpiece",
+    "apps/proto",
     "components/bridges/moteus_bridge", "components/tasks/diffdrive",
     "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/accel_limiter",
     "components/tasks/diffdrive_odometry"
-, "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evodo_dioxus", "external/evosim"]
+, "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/payloads/driver_station", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods"]
 resolver = "2"
+
+[profile.dev]
+opt-level = 1
 
 [workspace.dependencies]
 cu29 = "1.0.0"
 cu-spatial-payloads = "1.0.0"
 cu-sensor-payloads = "1.0.0"
 cu-apriltag = "1.0.0"
+cu-logmon = "1.0.1"
 cu29-export = { version = "*"  }
 serde = { version = "*", features = ["derive"] }
 nalgebra = "0.34.2"
@@ -38,3 +43,5 @@ field_oriented_diff_drive = { path = "./components/tasks/field_oriented_diff_dri
 iekflocalizer = { path = "./components/tasks/iekflocalizer/" }
 moteus_tasks = { path = "./components/tasks/moteus_tasks/" }
 evosim = { path = "./external/evosim/" }
+Joy = { path = "./components/sources/Joy/" }
+Prototyping = { path = "./components/tasks/Prototyping/" }

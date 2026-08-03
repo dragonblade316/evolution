@@ -1,14 +1,10 @@
 use common::ChassisSpeeds;
 use cu29::{
-    config::ComponentConfig,
-    cutask::{CuTask, Freezable},
-    input_msg, output_msg,
-    units::si::{
+    CuError, CuResult, config::ComponentConfig, cutask::{CuMsg, CuTask, Freezable}, input_msg, output_msg, units::si::{
         angular_velocity::radian_per_second,
         f32::{AngularVelocity, Velocity},
         velocity::meter_per_second,
-    },
-    CuError, CuResult,
+    }
 };
 use pid::Pid;
 
@@ -39,7 +35,7 @@ pub struct FieldOrientedDiffDrive {
 impl Freezable for FieldOrientedDiffDrive {}
 
 impl CuTask for FieldOrientedDiffDrive {
-    type Input<'m> = input_msg!(ChassisSpeeds, ChassisSpeeds);
+    type Input<'m> = input_msg!('m, ChassisSpeeds, ChassisSpeeds);
     //                          ^- desired      ^- current
     type Output<'m> = output_msg!(ChassisSpeeds);
     type Resources<'r> = ();
@@ -56,6 +52,7 @@ impl CuTask for FieldOrientedDiffDrive {
         let kd: f32 = config_get(config, "kd", 0.0)?;
         let output_limit: f32 = config_get(config, "output_limit", 5.0)?;
         let turn_slowdown: f32 = config_get(config, "turn_slowdown", 0.5)?;
+
 
         let mut pid = Pid::new(0.0f32, output_limit);
         pid.p(kp, output_limit).i(ki, output_limit).d(kd, output_limit);

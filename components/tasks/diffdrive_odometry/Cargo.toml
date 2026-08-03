@@ -7,3 +7,5 @@ edition = "2024"
 common = { workspace = true }
 cu29 = { workspace = true }
 ordered-float = { workspace = true }
+kfilter = { workspace = true, features = ["std"] }
+nalgebra = { workspace = true }
