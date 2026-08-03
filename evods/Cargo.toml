@@ -1,0 +1,9 @@
+[package]
+name = "evods"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+common.workspace = true
+cu29.workspace = true
+dioxus = "0.7.10"
