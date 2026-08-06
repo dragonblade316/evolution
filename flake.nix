@@ -56,6 +56,8 @@
 
             libxkbcommon
             libGL
+            # needed by dioxus-desktop (xdotool) for the evods driver station UI
+            xdotool
             zsh
             
             # WINIT_UNIX_BACKEND=wayland

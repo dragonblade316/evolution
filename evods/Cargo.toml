@@ -5,5 +5,15 @@ edition = "2024"
 
 [dependencies]
 common.workspace = true
+driver_station.workspace = true
 cu29.workspace = true
-dioxus = "0.7.10"
+dioxus.workspace = true
+crossbeam-channel.workspace = true
+tokio.workspace = true
+zenoh.workspace = true
+gilrs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# dioxus-desktop pulls native-tls -> openssl for its websocket devtools channel.
+# Vendoring openssl lets evods build without a system pkg-config / libssl-dev.
+openssl = { version = "0.10", features = ["vendored"] }

@@ -29,7 +29,7 @@ impl IEKF {
         let ad = exp_v.inverse().adj();
         // TODO: this should be Addition, not multiplication:
         //   self.P = ad * self.P * ad.transpose() + self.Q * dt;
-        self.P = ad * self.P * ad.transpose() * self.Q * dt;
+        self.P = ad * self.P * ad.transpose() + self.Q * dt;
 
 
     }

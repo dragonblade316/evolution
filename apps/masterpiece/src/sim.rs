@@ -22,15 +22,6 @@ const PREALLOCATED_STORAGE_SIZE: Option<usize> = Some(1024 * 1024 * 100);
 const TIME_STEP: f32 = 1.0 / 200.0;
 
 
-// Simulation types (Motor, DiffDriveState, DiffDrive)
-// now live in the `evosim` crate under external/evosim.
-//
-// Task / sim boundary:
-//   DiffDriveCmd  → MotorCMD (velocity per wheel)  → bridge → sim consumes
-//   sim produces  → MotorData (telemetry per wheel) → bridge → MoteusDiff consumes
-
-// ---------------------------------------------------------------------------
-
 #[copper_runtime(config = "copperconfig.ron", sim_mode = true)]
 struct MasterpieceApplication {}
 
