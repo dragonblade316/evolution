@@ -5,18 +5,17 @@ members = [
     "apps/proto",
     "components/bridges/moteus_bridge", "components/tasks/diffdrive",
     "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/accel_limiter",
-    "components/tasks/diffdrive_odometry"
-, "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/payloads/driver_station", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods"]
+    "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/payloads/driver_station", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods", "components/sources/BNOSource"]
 resolver = "2"
 
 [profile.dev]
 opt-level = 1
 
 [workspace.dependencies]
-cu29 = "1.0.0"
-cu-spatial-payloads = "1.0.0"
-cu-sensor-payloads = "1.0.0"
-cu-apriltag = "1.0.0"
+cu29 = "1.1.0"
+cu-spatial-payloads = "1.1.0"
+cu-sensor-payloads = "1.1.0"
+cu-apriltag = "1.1.0"
 cu-logmon = "1.0.1"
 cu29-export = { version = "*"  }
 serde = { version = "*", features = ["derive"] }
@@ -45,7 +44,6 @@ moteus_bridge = { path = "./components/bridges/moteus_bridge/" }
 oakd_lite_source = { path = "./components/sources/oakd_lite_source/" }
 accel_limiter = { path = "./components/tasks/accel_limiter/" }
 diffdrive = { path = "./components/tasks/diffdrive/" }
-diffdrive_odometry = { path = "./components/tasks/diffdrive_odometry/" }
 field_oriented_diff_drive = { path = "./components/tasks/field_oriented_diff_drive/" }
 iekflocalizer = { path = "./components/tasks/iekflocalizer/" }
 moteus_tasks = { path = "./components/tasks/moteus_tasks/" }

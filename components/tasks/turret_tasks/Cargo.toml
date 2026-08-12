@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 cu29.workspace = true
+common.workspace = true
 bincode.workspace = true

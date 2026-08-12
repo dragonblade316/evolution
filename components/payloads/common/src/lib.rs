@@ -118,3 +118,11 @@ pub struct GamePadState {
     pub d_left: bool,
     pub d_down: bool,
 }
+
+
+#[derive(Debug, Clone, Default, Encode, Decode, Serialize, Deserialize, Reflect)]
+pub struct TurretState {
+    pub flywheel: AngularVelocity,
+    pub position: Angle,
+    pub turret_speed: AngularVelocity,
+}

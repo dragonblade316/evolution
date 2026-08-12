@@ -1,7 +1,8 @@
 use cu29::cutask::{CuMsg, CuTask, Freezable};
 use cu29::reflect::Reflect;
 use cu29::units::si::angle::degree;
-use cu29::units::si::f32::Angle;
+use cu29::units::si::angular_velocity::revolution_per_minute;
+use cu29::units::si::f32::{Angle, AngularVelocity};
 use cu29::{input_msg, output_msg, CuResult};
 
 type TurretAngle = Angle;
@@ -87,6 +88,111 @@ impl CuTask for TurretAngleSolver {
         };
 
         output.set_payload(Angle::new::<degree>(solved_deg));
+        Ok(())
+    }
+}
+
+
+struct TurretCheck {
+    angle_tol: Angle,
+    velocity_tol: AngularVelocity,
+}
+
+impl Freezable for TurretCheck {}
+
+type DesiredState = common::TurretState;
+type CurrentState = common::TurretState;
+
+impl CuTask for TurretCheck {
+    type Input<'m> = input_msg!('m, CurrentState, DesiredState);
+    type Output<'m> = output_msg!(bool);
+    type Resources<'r> = ();
+
+    fn new(config: Option<&cu29::prelude::ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
+        where
+            Self: Sized {
+        const DEFAULT_ANGLE_TOL_DEG: f32 = 2.0;
+        const DEFAULT_VELOCITY_TOL_RPM: f32 = 10.0;
+
+        let (angle_tol_deg, velocity_tol_rpm) = match config {
+            Some(cfg) => (
+                cfg.get::<f32>("angle_tol")?.unwrap_or(DEFAULT_ANGLE_TOL_DEG),
+                cfg.get::<f32>("velocity_tol")?.unwrap_or(DEFAULT_VELOCITY_TOL_RPM),
+            ),
+            None => (DEFAULT_ANGLE_TOL_DEG, DEFAULT_VELOCITY_TOL_RPM),
+        };
+
+        Ok(Self {
+            angle_tol: Angle::new::<degree>(angle_tol_deg),
+            velocity_tol: AngularVelocity::new::<revolution_per_minute>(velocity_tol_rpm),
+        })
+    }
+
+    fn process<'i, 'o>(
+            &mut self,
+            _ctx: &cu29::prelude::CuContext,
+            input: &Self::Input<'i>,
+            output: &mut Self::Output<'o>,
+        ) -> CuResult<()> {
+            let (current, desired) = *input;
+            let (Some(current), Some(desired)) = (current.payload(), desired.payload())
+            else {
+                return Ok(());
+            };
+
+            let angle_err = (current.position.get::<degree>() - desired.position.get::<degree>()).abs();
+            let velocity_err = (current.flywheel.get::<revolution_per_minute>() - desired.flywheel.get::<revolution_per_minute>()).abs();
+            let speed_err = (current.turret_speed.get::<revolution_per_minute>() - desired.turret_speed.get::<revolution_per_minute>()).abs();
+
+            let in_tol = angle_err <= self.angle_tol.get::<degree>()
+                && velocity_err <= self.velocity_tol.get::<revolution_per_minute>()
+                && speed_err <= self.velocity_tol.get::<revolution_per_minute>();
+
+            output.set_payload(in_tol);
+
+            Ok(())
+    }
+}
+
+#[derive(Reflect)]
+pub struct TurretStateAssembler {}
+
+impl Freezable for TurretStateAssembler {}
+
+type FlywheelSpeed = AngularVelocity;
+type TurretSpeed = AngularVelocity;
+type TurretPosition = Angle;
+
+impl CuTask for TurretStateAssembler {
+    type Input<'m> = input_msg!('m, FlywheelSpeed, TurretSpeed, TurretPosition);
+    type Output<'m> = output_msg!(common::TurretState);
+    type Resources<'r> = ();
+
+    fn new(_config: Option<&cu29::prelude::ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self {})
+    }
+
+    fn process(
+        &mut self,
+        _ctx: &cu29::prelude::CuContext,
+        input: &Self::Input<'_>,
+        output: &mut Self::Output<'_>,
+    ) -> CuResult<()> {
+        let (flywheel_msg, speed_msg, position_msg) = *input;
+        let (Some(flywheel), Some(speed), Some(position)) =
+            (flywheel_msg.payload(), speed_msg.payload(), position_msg.payload())
+        else {
+            return Ok(());
+        };
+
+        output.set_payload(common::TurretState {
+            flywheel: *flywheel,
+            position: *position,
+            turret_speed: *speed,
+        });
         Ok(())
     }
 }

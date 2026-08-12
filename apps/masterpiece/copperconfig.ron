@@ -21,6 +21,7 @@
             type: "tasks::AprilTagSource",
             run_in_sim: true,
         ),
+
         (
             id: "poselog",
             type: "tasks::PoseLogSink",
@@ -33,7 +34,7 @@
         ),
         (
             id: "odom",
-            type: "diffdrive_odometry::DiffDriveOdometry"
+            type: "diffdrive::odom::DiffDriveOdometry"
         ),
         (
             id: "diffdrivereader",

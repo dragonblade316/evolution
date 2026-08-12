@@ -1,77 +1,154 @@
-use std::any::Any;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::time::Duration;
 
-use gilrs::Button;
-use gilrs::Gilrs;
-use gilrs::Event;
-use tokio::spawn;
-use tokio::sync::mpsc;
-use tokio::sync::watch;
-use tokio::task::spawn_blocking;
+use eframe::egui;
+use tokio::sync::{mpsc, watch};
 
-use dioxus::prelude::*;
+/// Latest joystick snapshot. Written by `joy_runtime` (std thread), read by
+/// `zruntime` (tokio thread) via a `tokio::sync::watch`.
+pub type PadState = common::GamePadState;
 
-fn joyruntime(tx: watch::Sender<common::GamePadState>) {
-    let mut gilrs = Gilrs::new().expect("GILRS failed to start (how?)");
+/// Commands the UI (main/egui thread) sends down to `zruntime`.
+#[derive(Debug)]
+pub enum UiCommand {
+    /// Placeholder — replace with real commands later (enable, disable, mode, …).
+    Ping,
+}
 
-    let mut active_gamepad = None;
+/// Status / telemetry `zruntime` pushes back up to the UI.
+#[derive(Debug)]
+pub enum RobotStatus {
+    /// Placeholder — replace with real status later (connection, voltage, …).
+    Pong,
+}
 
+/// Runs on a plain OS thread with no async runtime.
+///
+/// Polls the gamepad and publishes the latest snapshot over the `watch`
+/// channel. `watch::Sender::send` is sync, so no tokio runtime is needed here.
+fn joy_runtime(pad_tx: watch::Sender<PadState>) {
+    println!("[joy] thread started");
+    let state = PadState::default();
     loop {
-        while let Some(Event { id, event, time, .. }) = gilrs.next_event() {
-            println!("{:?} New event from {}: {:?}", time, id, event);
-            active_gamepad = Some(id);
+        // TODO: gilrs polling -> fill `state`.
+        if pad_tx.send(state.clone()).is_err() {
+            // All receivers dropped -> zruntime exited; stop polling.
+            println!("[joy] zruntime gone, exiting");
+            break;
         }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
 
-        // You can also use cached gamepad state
-        if let Some(gamepad) = active_gamepad.map(|id| gilrs.gamepad(id)) {
-            if gamepad.is_pressed(Button::South) {
-                println!("Button South is pressed (XBox - A, PS - X)");
+/// Runs on its own OS thread hosting a tokio runtime.
+///
+/// Reads the latest joystick snapshot from the `watch` receiver, handles UI
+/// commands coming down from the egui thread, and pushes status updates back
+/// up to it.
+fn zruntime(
+    mut pad_rx: watch::Receiver<PadState>,
+    mut cmd_rx: mpsc::Receiver<UiCommand>,
+    status_tx: mpsc::Sender<RobotStatus>,
+) {
+    println!("[zruntime] building tokio runtime");
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+
+
+
+    runtime.block_on(async move {
+        println!("[zruntime] runtime running");
+        // TODO: zenoh session + subscriber setup.
+        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+        let telsub = session.declare_subscriber("evods/tel").await.unwrap();
+
+        loop {
+            tokio::select! {
+                Ok(()) = pad_rx.changed() => {
+                    let _latest = pad_rx.borrow().clone();
+                }
+                Some(cmd) = cmd_rx.recv() => {
+                }
+                tel = telsub.recv_async() => {
+                }
+
             }
         }
+    })
+}
+
+fn main() -> eframe::Result<()> {
+    // Joystick latest-state channel.
+    let (pad_tx, pad_rx) = watch::channel(PadState::default());
+
+    // UI -> zruntime commands.
+    let (cmd_tx, cmd_rx) = mpsc::channel::<UiCommand>(32);
+
+    // zruntime -> UI status.
+    let (status_tx, status_rx) = mpsc::channel::<RobotStatus>(32);
+
+    zenoh::
+
+    // Spawn the two background workers up front, before the UI starts.
+    std::thread::spawn(move || joy_runtime(pad_tx));
+    std::thread::spawn(move || zruntime(pad_rx, cmd_rx, status_tx));
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "evods",
+        options,
+        Box::new(move |_cc| Ok(Box::new(EvodsApp::new(cmd_tx, status_rx)))),
+    )
+}
+
+struct EvodsApp {
+    /// Sends commands down to `zruntime`. `try_send` is non-blocking and needs
+    /// no tokio runtime, so it's safe to call from the egui thread.
+    cmd_tx: mpsc::Sender<UiCommand>,
+    /// Drains status updates from `zruntime`. `try_recv` is non-blocking.
+    status_rx: mpsc::Receiver<RobotStatus>,
+    /// Most recent status, shown in the UI.
+    last_status: Option<RobotStatus>,
+}
+
+impl EvodsApp {
+    fn new(cmd_tx: mpsc::Sender<UiCommand>, status_rx: mpsc::Receiver<RobotStatus>) -> Self {
+        Self {
+            cmd_tx,
+            status_rx,
+            last_status: None,
+        }
     }
 }
 
-fn joygrab() -> common::GamePadState {
-    todo!()
-}
-
-async fn zruntime(ui_rx: UnboundedReceiver<UICOMMAND>) {
-    let session = zenoh::open(zenoh::Config::default()).await.expect("zenoh failed to start (How?!?!)");
-    let subscriber = session.declare_subscriber("key/expression").await.unwrap();
-
-    loop {
-        //Handle ui triggered state changes.
-
-        //Check for messages from robot and update internal state accordingly
-        match subscriber.try_recv().unwrap() {
-            _ => {}
+impl eframe::App for EvodsApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Drain any pending status updates from zruntime (non-blocking).
+        while let Ok(status) = self.status_rx.try_recv() {
+            self.last_status = Some(status);
         }
 
-        //Update gamepad
+        egui::CentralPanel::default().show(ui, |ui| {
+            ui.heading("evods");
+            ui.label("driver station ui — todo");
 
-        //If state changed, publish data to robot
+            ui.separator();
 
+            if ui.button("Ping zruntime").clicked() {
+                // Non-blocking send from the UI thread.
+                let _ = self.cmd_tx.try_send(UiCommand::Ping);
+            }
+
+            ui.separator();
+            ui.label(format!(
+                "last status: {:?}",
+                self.last_status.as_ref().map(|s| s).map(|s| format!("{s:?}")).unwrap_or_default()
+            ));
+        });
     }
-}
-
-enum UICOMMAND {
-
-}
-
-#[tokio::main]
-async fn main() {
-    let (zen_tx, mut zen_rx) = watch::channel("");
-    let (joy_tx, mut joy_rx) = watch::channel("");
-    let (ui_tx , mut ui_rx) = mpsc::unbounded_channel::<UICOMMAND>();
-
-    let _zenoh = spawn(zruntime(ui_rx));
-
-    dioxus::launch(App);
-}
-
-
-#[component]
-fn App() -> Element {
-    rsx! { "HotDog!" }
 }

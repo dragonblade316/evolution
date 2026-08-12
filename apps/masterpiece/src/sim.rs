@@ -217,5 +217,7 @@ fn main() {
         if let Some(remaining) = period.checked_sub(frame_start.elapsed()) {
             std::thread::sleep(remaining);
         }
+
+
     }
 }

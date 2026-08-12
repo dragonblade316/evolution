@@ -45,8 +45,8 @@
             rustPlatform.bindgenHook
             rerun
             opencv4
-            
-            
+            apriltag
+
             pkg-config
             mujoco
 
@@ -59,7 +59,7 @@
             # needed by dioxus-desktop (xdotool) for the evods driver station UI
             xdotool
             zsh
-            
+
             # WINIT_UNIX_BACKEND=wayland
             wayland
 
@@ -76,7 +76,7 @@
             alsa-lib
             #why is libudev in systemd?
             systemd
-                
+
             #things for flutter
             flutter
             gtk3
@@ -97,6 +97,8 @@
           shellHook = ''
             zsh
           '';
+
+
 
           env.MUJOCO_PATH = "${mujoco}";
           env.MUJOCO_PLUGIN_PATH = "${mujoco}/lib";
