@@ -1,0 +1,9 @@
+[package]
+name = "allience_spesific_tasks"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+common = { workspace = true }
+cu29 = { workspace = true }
+cu-spatial-payloads = { workspace = true }

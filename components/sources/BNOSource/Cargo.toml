@@ -1,0 +1,10 @@
+[package]
+name = "BNOSource"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cu29 = { workspace = true }
+common = { workspace = true }
+bincode = { workspace = true }
+bno08x-rs = "=2.0.1"
