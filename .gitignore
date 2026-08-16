@@ -1,0 +1,7 @@
+/target
+*.copper
+Cargo.lock
+/assets/**/assets
+doc/.obsidian/
+hw/**/.history/
+*.kicad_prl
