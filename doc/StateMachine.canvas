@@ -1,0 +1,29 @@
+{
+	"nodes":[
+		{"id":"7c2835db4664eba4","x":-120,"y":-40,"width":250,"height":60,"type":"text","text":"Needs zeroed"},
+		{"id":"c948d5c83846a4a3","x":-500,"y":-40,"width":250,"height":60,"type":"text","text":"Start"},
+		{"id":"8d8435c48ad25356","x":600,"y":-40,"width":250,"height":60,"type":"text","text":"Disabled"},
+		{"id":"f4d504a5823eac75","x":593,"y":91,"width":250,"height":169,"type":"text","text":"Note: Any state after disabled can go back to disabled if the disable button is triggered or the state of the robot is unsafe"},
+		{"id":"0f0a905b4e17e6a4","x":1080,"y":-40,"width":250,"height":60,"type":"text","text":"Idle"},
+		{"id":"76c3bc345468278e","x":-126,"y":354,"width":250,"height":60,"type":"text","text":"Intake"},
+		{"id":"87ba51996e1693be","x":-126,"y":495,"width":250,"height":60,"type":"text","text":"Shoot"},
+		{"id":"5245a06d2622c317","x":-560,"y":465,"width":250,"height":60,"type":"text","text":"Idle"},
+		{"id":"2721f7d9e2be6658","x":-100,"y":640,"width":250,"height":60,"type":"text","text":"Walk and talk"},
+		{"id":"dca3fea931bc4bf3","x":1500,"y":-40,"width":250,"height":60,"type":"text","text":"IntakingWaitingForShooter"},
+		{"id":"12454b99e6764646","x":2040,"y":-40,"width":250,"height":60,"type":"text","text":"IntakingAndShooting"},
+		{"id":"5dfbb85d6a38647a","x":1500,"y":-260,"width":250,"height":60,"type":"text","text":"Intaking"}
+	],
+	"edges":[
+		{"id":"424be8293d158454","fromNode":"c948d5c83846a4a3","fromSide":"right","toNode":"7c2835db4664eba4","toSide":"left","label":"Instant"},
+		{"id":"f910244abebd7973","fromNode":"7c2835db4664eba4","fromSide":"right","toNode":"8d8435c48ad25356","toSide":"left","label":"Upon turret being zeroed and maybe tag"},
+		{"id":"dbf80e7d3f29d8c1","fromNode":"8d8435c48ad25356","fromSide":"right","toNode":"0f0a905b4e17e6a4","toSide":"left","label":"Enabled"},
+		{"id":"fae713521cf4cf1f","fromNode":"5245a06d2622c317","fromSide":"right","toNode":"76c3bc345468278e","toSide":"left","label":"\n"},
+		{"id":"074f6c04a90b6bfa","fromNode":"5245a06d2622c317","fromSide":"right","toNode":"87ba51996e1693be","toSide":"left"},
+		{"id":"fe0a325b98f9d969","fromNode":"5245a06d2622c317","fromSide":"right","toNode":"2721f7d9e2be6658","toSide":"left"},
+		{"id":"8ceb0cb816968f32","fromNode":"2721f7d9e2be6658","fromSide":"left","toNode":"5245a06d2622c317","toSide":"right"},
+		{"id":"9061d9181ab752c5","fromNode":"dca3fea931bc4bf3","fromSide":"right","toNode":"12454b99e6764646","toSide":"left"},
+		{"id":"d20effb5357586ae","fromNode":"12454b99e6764646","fromSide":"left","toNode":"dca3fea931bc4bf3","toSide":"right","label":"state: Ready to fire"},
+		{"id":"247733b3441617e8","fromNode":"0f0a905b4e17e6a4","fromSide":"top","toNode":"5dfbb85d6a38647a","toSide":"left","label":"cmd: intake"},
+		{"id":"c399d2d196efb6cb","fromNode":"0f0a905b4e17e6a4","fromSide":"right","toNode":"dca3fea931bc4bf3","toSide":"left","label":"cmd: intaking"}
+	]
+}

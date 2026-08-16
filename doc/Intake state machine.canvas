@@ -1,0 +1,20 @@
+{
+	"nodes":[
+		{"id":"7f6fffcd63dd7ee3","type":"text","text":"Intaking","x":-60,"y":100,"width":250,"height":60},
+		{"id":"8755152d1db635f4","type":"text","text":"Pass","x":-60,"y":-420,"width":250,"height":60},
+		{"id":"be03f27d174d0df6","type":"text","text":"Idle","x":-460,"y":-70,"width":250,"height":60},
+		{"id":"475fc6ecb048d86b","type":"text","text":"Retract","x":240,"y":-160,"width":250,"height":60},
+		{"id":"28b1e16f924e3897","type":"text","text":"Cmds:\nIdle\nIntake\nPass (turret is ready open servo)\n\nState: \nRetracted (Has the indexer finished removing a ball from the turret)","x":-800,"y":160,"width":440,"height":220},
+		{"id":"5ea160a2b080055b","x":-60,"y":270,"width":250,"height":60,"type":"text","text":"Outtaking"}
+	],
+	"edges":[
+		{"id":"0a5b43c8d933eb47","fromNode":"be03f27d174d0df6","fromSide":"right","toNode":"8755152d1db635f4","toSide":"left","label":"Cmd: Pass"},
+		{"id":"7bc36678e19a17a9","fromNode":"be03f27d174d0df6","fromSide":"right","toNode":"7f6fffcd63dd7ee3","toSide":"left","label":"Cmd: Intake"},
+		{"id":"c9399ec1d73fe11c","fromNode":"7f6fffcd63dd7ee3","fromSide":"top","toNode":"8755152d1db635f4","toSide":"bottom"},
+		{"id":"30220f9fd23adce1","fromNode":"8755152d1db635f4","fromSide":"right","toNode":"475fc6ecb048d86b","toSide":"top","label":"Cmd != Pass"},
+		{"id":"4865cb38d5e4b183","fromNode":"475fc6ecb048d86b","fromSide":"left","toNode":"be03f27d174d0df6","toSide":"top","label":"Cmd: Idle && State: Retracted"},
+		{"id":"aa7e25ba9112d2f5","fromNode":"475fc6ecb048d86b","fromSide":"bottom","toNode":"7f6fffcd63dd7ee3","toSide":"right","label":"Cmd: Pass && State: Retracted"},
+		{"id":"35c42ae2040178dc","fromNode":"5ea160a2b080055b","fromSide":"left","toNode":"be03f27d174d0df6","toSide":"bottom"},
+		{"id":"62f49f4ae61df07a","fromNode":"be03f27d174d0df6","fromSide":"bottom","toNode":"5ea160a2b080055b","toSide":"left"}
+	]
+}
