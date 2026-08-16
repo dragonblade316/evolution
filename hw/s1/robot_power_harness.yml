@@ -1,0 +1,410 @@
+# WireViz source converted from image(1).png.
+#
+# Assumptions captured from the sketch:
+# - 6S LiPo battery, RDQ Series 6S 1000 mAh 100C, about 22-25 V.
+# - Main positive lead passes through a resettable breaker or fuse, then a precharge
+#   connection, then into a power distribution bus.
+# - Main battery/PDB conductors are 12 AWG.
+# - ESC branch conductors are 20 AWG unless updated after current testing.
+# - Each ESC positive feed has a 20 A fuse before the ESC.
+# - The PDB internally ties all BAT+/ESC+/AUX+ terminals together and all
+#   BAT-/ESC-/AUX- terminals together.
+# - Motor 3 current limit was unclear in the drawing; it is recorded as 12 A?.
+
+metadata:
+  title: S1 Robot Power Harness
+  source: hw/s1/image(1).png
+  date: 2026-08-15
+
+connectors:
+  BATT_6S:
+    type: Battery
+    subtype: RDQ Series 6S LiPo, 1000 mAh, 100C
+    pinlabels: [BAT+, BAT-]
+    notes: Nominal 22.2 V, charged about 25.2 V.
+
+  MAIN_PROTECTION:
+    type: Fuse or resettable breaker
+    subtype: Main battery protection
+    pincount: 2
+    notes: Sketch calls out "10A breaker or fuse" and "15A?". Select final rating after load test.
+
+  PRECHARGE:
+    type: Precharge connector
+    pincount: 2
+
+  PDB:
+    type: Power distribution bus
+    pinlabels:
+      - BAT+
+      - BAT-
+      - ESC1+
+      - ESC1-
+      - ESC2+
+      - ESC2-
+      - ESC3+
+      - ESC3-
+      - ESC4+
+      - ESC4-
+      - ESC5+
+      - ESC5-
+      - AUX_SERVO+
+      - AUX_SERVO-
+      - AUX_PI+
+      - AUX_PI-
+    notes: Positive terminals are common internally; negative terminals are common internally.
+
+  F_ESC1_20A:
+    type: Fuse
+    subtype: 20 A
+    pincount: 2
+  F_ESC2_20A:
+    type: Fuse
+    subtype: 20 A
+    pincount: 2
+  F_ESC3_20A:
+    type: Fuse
+    subtype: 20 A
+    pincount: 2
+  F_ESC4_20A:
+    type: Fuse
+    subtype: 20 A
+    pincount: 2
+  F_ESC5_20A:
+    type: Fuse
+    subtype: 20 A
+    pincount: 2
+
+  ESC1:
+    type: ESC
+    subtype: Motor 1 controller
+    pinlabels: [VBAT+, VBAT-, PHASE_A, PHASE_B, PHASE_C, SIGNAL, GND]
+    notes: Motor 1 current limit shown as 12 A.
+  ESC2:
+    type: ESC
+    subtype: Motor 2 controller
+    pinlabels: [VBAT+, VBAT-, PHASE_A, PHASE_B, PHASE_C, SIGNAL, GND]
+    notes: Motor 2 current limit shown as 12 A.
+  ESC3:
+    type: ESC
+    subtype: Motor 3 controller
+    pinlabels: [VBAT+, VBAT-, PHASE_A, PHASE_B, PHASE_C, SIGNAL, GND]
+    notes: Motor 3 current limit unclear; sketch says not sure about limits.
+  ESC4:
+    type: ESC
+    subtype: Motor 4 controller
+    pinlabels: [VBAT+, VBAT-, PHASE_A, PHASE_B, PHASE_C, SIGNAL, GND]
+    notes: Motor 4 current limit shown as 8 A.
+  ESC5:
+    type: ESC
+    subtype: Motor 5 controller
+    pinlabels: [VBAT+, VBAT-, PHASE_A, PHASE_B, PHASE_C, SIGNAL, GND]
+    notes: Motor 5 current limit shown as 15 A.
+
+  M1:
+    type: Brushless motor
+    subtype: Motor 1
+    pinlabels: [U, V, W]
+  M2:
+    type: Brushless motor
+    subtype: Motor 2
+    pinlabels: [U, V, W]
+  M3:
+    type: Brushless motor
+    subtype: Motor 3
+    pinlabels: [U, V, W]
+  M4:
+    type: Brushless motor
+    subtype: Motor 4
+    pinlabels: [U, V, W]
+  M5:
+    type: Brushless motor
+    subtype: Motor 5
+    pinlabels: [U, V, W]
+
+  F_SERVO_10A:
+    type: Fuse
+    subtype: 10 A
+    pincount: 2
+  F_PI_10A:
+    type: Fuse
+    subtype: 10 A
+    pincount: 2
+
+  SERVO:
+    type: Servo load
+    pinlabels: [VIN+, VIN-]
+    notes: Sketch shows 1-3 A stall.
+  PI:
+    type: Raspberry Pi load
+    pinlabels: [VIN+, VIN-]
+
+cables:
+  W_BATT_MAIN:
+    wirecount: 2
+    gauge: 12 AWG
+    colors: [RD, BK]
+    length: 0.15 m
+  W_MAIN_TO_PRECHARGE:
+    wirecount: 1
+    gauge: 12 AWG
+    colors: [RD]
+    length: 0.05 m
+  W_PRECHARGE_TO_PDB:
+    wirecount: 1
+    gauge: 12 AWG
+    colors: [RD]
+    length: 0.10 m
+
+  W_ESC1_POS_IN:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC1_POS_OUT:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC1_NEG:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [BK]
+
+  W_ESC2_POS_IN:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC2_POS_OUT:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC2_NEG:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [BK]
+
+  W_ESC3_POS_IN:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC3_POS_OUT:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC3_NEG:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [BK]
+
+  W_ESC4_POS_IN:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC4_POS_OUT:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC4_NEG:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [BK]
+
+  W_ESC5_POS_IN:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC5_POS_OUT:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_ESC5_NEG:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [BK]
+
+  W_M1_PHASES:
+    wirecount: 3
+    gauge: 20 AWG
+    colors: [YE, GN, BU]
+  W_M2_PHASES:
+    wirecount: 3
+    gauge: 20 AWG
+    colors: [YE, GN, BU]
+  W_M3_PHASES:
+    wirecount: 3
+    gauge: 20 AWG
+    colors: [YE, GN, BU]
+  W_M4_PHASES:
+    wirecount: 3
+    gauge: 20 AWG
+    colors: [YE, GN, BU]
+  W_M5_PHASES:
+    wirecount: 3
+    gauge: 20 AWG
+    colors: [YE, GN, BU]
+
+  W_SERVO_POS_IN:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_SERVO_POS_OUT:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_SERVO_NEG:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [BK]
+
+  W_PI_POS_IN:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_PI_POS_OUT:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [RD]
+  W_PI_NEG:
+    wirecount: 1
+    gauge: 20 AWG
+    colors: [BK]
+
+connections:
+  -
+    - BATT_6S: 1
+    - W_BATT_MAIN: 1
+    - MAIN_PROTECTION: 1
+  -
+    - MAIN_PROTECTION: 2
+    - W_MAIN_TO_PRECHARGE: 1
+    - PRECHARGE: 1
+  -
+    - PRECHARGE: 2
+    - W_PRECHARGE_TO_PDB: 1
+    - PDB: 1
+  -
+    - BATT_6S: 2
+    - W_BATT_MAIN: 2
+    - PDB: 2
+
+  -
+    - PDB: 3
+    - W_ESC1_POS_IN: 1
+    - F_ESC1_20A: 1
+  -
+    - F_ESC1_20A: 2
+    - W_ESC1_POS_OUT: 1
+    - ESC1: 1
+  -
+    - PDB: 4
+    - W_ESC1_NEG: 1
+    - ESC1: 2
+
+  -
+    - PDB: 5
+    - W_ESC2_POS_IN: 1
+    - F_ESC2_20A: 1
+  -
+    - F_ESC2_20A: 2
+    - W_ESC2_POS_OUT: 1
+    - ESC2: 1
+  -
+    - PDB: 6
+    - W_ESC2_NEG: 1
+    - ESC2: 2
+
+  -
+    - PDB: 7
+    - W_ESC3_POS_IN: 1
+    - F_ESC3_20A: 1
+  -
+    - F_ESC3_20A: 2
+    - W_ESC3_POS_OUT: 1
+    - ESC3: 1
+  -
+    - PDB: 8
+    - W_ESC3_NEG: 1
+    - ESC3: 2
+
+  -
+    - PDB: 9
+    - W_ESC4_POS_IN: 1
+    - F_ESC4_20A: 1
+  -
+    - F_ESC4_20A: 2
+    - W_ESC4_POS_OUT: 1
+    - ESC4: 1
+  -
+    - PDB: 10
+    - W_ESC4_NEG: 1
+    - ESC4: 2
+
+  -
+    - PDB: 11
+    - W_ESC5_POS_IN: 1
+    - F_ESC5_20A: 1
+  -
+    - F_ESC5_20A: 2
+    - W_ESC5_POS_OUT: 1
+    - ESC5: 1
+  -
+    - PDB: 12
+    - W_ESC5_NEG: 1
+    - ESC5: 2
+
+  -
+    - ESC1: [3, 4, 5]
+    - W_M1_PHASES: [1, 2, 3]
+    - M1: [1, 2, 3]
+  -
+    - ESC2: [3, 4, 5]
+    - W_M2_PHASES: [1, 2, 3]
+    - M2: [1, 2, 3]
+  -
+    - ESC3: [3, 4, 5]
+    - W_M3_PHASES: [1, 2, 3]
+    - M3: [1, 2, 3]
+  -
+    - ESC4: [3, 4, 5]
+    - W_M4_PHASES: [1, 2, 3]
+    - M4: [1, 2, 3]
+  -
+    - ESC5: [3, 4, 5]
+    - W_M5_PHASES: [1, 2, 3]
+    - M5: [1, 2, 3]
+
+  -
+    - PDB: 13
+    - W_SERVO_POS_IN: 1
+    - F_SERVO_10A: 1
+  -
+    - F_SERVO_10A: 2
+    - W_SERVO_POS_OUT: 1
+    - SERVO: 1
+  -
+    - PDB: 14
+    - W_SERVO_NEG: 1
+    - SERVO: 2
+
+  -
+    - PDB: 15
+    - W_PI_POS_IN: 1
+    - F_PI_10A: 1
+  -
+    - F_PI_10A: 2
+    - W_PI_POS_OUT: 1
+    - PI: 1
+  -
+    - PDB: 16
+    - W_PI_NEG: 1
+    - PI: 2
+
+additional_bom_items:
+  -
+    description: 20 A ESC fuses
+    qty: 5
+  -
+    description: 10 A auxiliary-load fuses
+    qty: 2
+  -
+    description: Main breaker or fuse, final rating TBD
+    qty: 1
