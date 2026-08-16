@@ -92,6 +92,12 @@ pub enum DSStatus {
     ENABLED(Allience),
 }
 
+impl Default for DSStatus {
+    fn default() -> Self {
+        Self::DISCONNECTED
+    }
+}
+
 /// Snapshot of a gamepad's state, intended as a copper-rs payload.
 ///
 /// NOTE: menu buttons (Start / Select / Home) and stick buttons (LS / RS)
@@ -124,5 +130,4 @@ pub struct GamePadState {
 pub struct TurretState {
     pub flywheel: AngularVelocity,
     pub position: Angle,
-    pub turret_speed: AngularVelocity,
 }

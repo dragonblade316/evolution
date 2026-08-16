@@ -56,8 +56,8 @@ impl CuSinkTask for RobotVisualizer {
         let [tx, ty, tz] = pose.translation();
         let rot = pose.rotation();
         let yaw = f32::atan2(
-            rot[1][0].get::<radian>() as f32,
-            rot[0][0].get::<radian>() as f32,
+            rot[1][0] as f32,
+            rot[0][0] as f32,
         );
 
         self.rec

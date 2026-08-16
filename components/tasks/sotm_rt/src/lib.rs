@@ -5,11 +5,24 @@ use cu29::{
     input_msg, output_msg,
     CuResult,
 };
+use cu29::units::si::angle::radian;
+use cu29::units::si::f32::{Angle, Velocity};
+use cu29::units::si::velocity::meter_per_second;
 use cu_spatial_payloads::Pose;
 
 use std::f64::consts::PI;
 use eqsolver::nalgebra::DVector;
 use ivp::prelude::*;
+
+/// Turret azimuth measured clockwise/counterclockwise from "straight
+/// ahead" of the robot (0 rad = muzzle points along the robot's +x axis).
+/// Carries the same SI radian storage as [`turret_tasks::TurretAngle`] so
+/// downstream consumers (e.g. [`turret_tasks::TurretAngleSolver`]) can wire
+/// straight in.
+pub type TurretAngle = Angle;
+
+/// Muzzle speed along the firing axis. SI meters/second.
+pub type MuzzleVelocity = Velocity;
 
 struct Ball {}
 impl SecondOrderSystem for Ball {
@@ -104,7 +117,7 @@ impl Freezable for SOTM {
 impl CuTask for SOTM {
     type Input<'m> = input_msg!((Pose<f64>, ChassisSpeeds));
 
-    type Output<'m> = output_msg!((f64, f64));
+    type Output<'m> = output_msg!('m, TurretAngle, MuzzleVelocity);
 
     type Resources<'r> = ();
 
@@ -143,9 +156,11 @@ impl CuTask for SOTM {
         let robot_y = robot_translation[1].raw();
         let robot_z = robot_translation[2].raw();
 
-        // Extract yaw from the 3x3 rotation matrix
-        let rot = robot_pose.rotation();
-        let heading = f64::atan2(rot[1][0].raw(), rot[0][0].raw());
+// Extract yaw from the 3x3 rotation matrix. `Pose::rotation()` returns the
+// raw dimensionless rotation matrix as `[[T; 3]; 3]` (see cu-spatial-payloads
+// 1.1.0 docs), so the element access is already an `f64` — no `.raw()` needed.
+let rot = robot_pose.rotation();
+let heading = f64::atan2(rot[1][0], rot[0][0]);
 
         let robot_vx = robot_speeds.x.raw() as f64;
         let robot_vy = robot_speeds.y.raw() as f64;
@@ -195,7 +210,15 @@ impl CuTask for SOTM {
             dist_to_goal, dz, v_parallel, v_perpendicular, heading, goal_direction,
         );
 
-        output.set_payload((turret_angle, muzzle_velocity));
+        // Wrap the f64 solver outputs into the typed SI unit exports expected
+        // by the rest of the graph (`TurretAngle` matches the `Angle` consumed
+        // by turret_tasks::TurretAngleSolver; `MuzzleVelocity` matches the
+        // `Velocity` used by DiffDriveSpeeds). Truncate f64→f32 here: the
+        // impact of the last 7+ digits is well below motor encoder noise.
+        let (turret_angle_out, muzzle_velocity_out) = output;
+        turret_angle_out.set_payload(TurretAngle::new::<radian>(turret_angle as f32));
+        muzzle_velocity_out
+            .set_payload(MuzzleVelocity::new::<meter_per_second>(muzzle_velocity as f32));
 
         Ok(())
     }

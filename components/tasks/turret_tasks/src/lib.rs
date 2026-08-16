@@ -1,9 +1,13 @@
 use cu29::cutask::{CuMsg, CuTask, Freezable};
 use cu29::reflect::Reflect;
 use cu29::units::si::angle::degree;
-use cu29::units::si::angular_velocity::revolution_per_minute;
-use cu29::units::si::f32::{Angle, AngularVelocity};
-use cu29::{input_msg, output_msg, CuResult};
+use cu29::units::si::{
+    angular_velocity::{radian_per_second, revolution_per_minute},
+    f32::{Angle, AngularVelocity, Length, Velocity},
+    length::meter,
+    velocity::meter_per_second,
+};
+use cu29::{input_msg, output_msg, CuError, CuResult};
 
 type TurretAngle = Angle;
 type TargetAngle = Angle;
@@ -142,11 +146,9 @@ impl CuTask for TurretCheck {
 
             let angle_err = (current.position.get::<degree>() - desired.position.get::<degree>()).abs();
             let velocity_err = (current.flywheel.get::<revolution_per_minute>() - desired.flywheel.get::<revolution_per_minute>()).abs();
-            let speed_err = (current.turret_speed.get::<revolution_per_minute>() - desired.turret_speed.get::<revolution_per_minute>()).abs();
 
             let in_tol = angle_err <= self.angle_tol.get::<degree>()
-                && velocity_err <= self.velocity_tol.get::<revolution_per_minute>()
-                && speed_err <= self.velocity_tol.get::<revolution_per_minute>();
+                && velocity_err <= self.velocity_tol.get::<revolution_per_minute>();
 
             output.set_payload(in_tol);
 
@@ -160,11 +162,10 @@ pub struct TurretStateAssembler {}
 impl Freezable for TurretStateAssembler {}
 
 type FlywheelSpeed = AngularVelocity;
-type TurretSpeed = AngularVelocity;
 type TurretPosition = Angle;
 
 impl CuTask for TurretStateAssembler {
-    type Input<'m> = input_msg!('m, FlywheelSpeed, TurretSpeed, TurretPosition);
+    type Input<'m> = input_msg!('m, FlywheelSpeed, TurretPosition);
     type Output<'m> = output_msg!(common::TurretState);
     type Resources<'r> = ();
 
@@ -181,9 +182,8 @@ impl CuTask for TurretStateAssembler {
         input: &Self::Input<'_>,
         output: &mut Self::Output<'_>,
     ) -> CuResult<()> {
-        let (flywheel_msg, speed_msg, position_msg) = *input;
-        let (Some(flywheel), Some(speed), Some(position)) =
-            (flywheel_msg.payload(), speed_msg.payload(), position_msg.payload())
+        let (flywheel_msg, position_msg) = *input;
+        let (Some(flywheel), Some(position)) = (flywheel_msg.payload(), position_msg.payload())
         else {
             return Ok(());
         };
@@ -191,8 +191,86 @@ impl CuTask for TurretStateAssembler {
         output.set_payload(common::TurretState {
             flywheel: *flywheel,
             position: *position,
-            turret_speed: *speed,
         });
+        Ok(())
+    }
+}
+
+/// Assembles a turret state from a muzzle velocity and a turret position.
+///
+/// The muzzle velocity is converted to flywheel angular velocity with
+/// `omega = muzzle_velocity / flywheel_radius`.
+#[derive(Reflect)]
+pub struct MuzzleVelocityTurretStateAssembler {
+    flywheel_radius: Length,
+}
+
+type MuzzleVelocity = Velocity;
+
+impl Freezable for MuzzleVelocityTurretStateAssembler {}
+
+impl MuzzleVelocityTurretStateAssembler {
+    fn assemble(
+        muzzle_velocity: MuzzleVelocity,
+        turret_position: TurretPosition,
+        flywheel_radius: Length,
+    ) -> common::TurretState {
+        common::TurretState {
+            flywheel: AngularVelocity::new::<radian_per_second>(
+                muzzle_velocity.get::<meter_per_second>() / flywheel_radius.get::<meter>(),
+            ),
+            position: turret_position,
+        }
+    }
+}
+
+impl CuTask for MuzzleVelocityTurretStateAssembler {
+    type Input<'m> = input_msg!('m, MuzzleVelocity, TurretPosition);
+    type Output<'m> = output_msg!(common::TurretState);
+    type Resources<'r> = ();
+
+    fn new(
+        config: Option<&cu29::prelude::ComponentConfig>,
+        _resources: Self::Resources<'_>,
+    ) -> CuResult<Self>
+    where
+        Self: Sized,
+    {
+        const DEFAULT_FLYWHEEL_RADIUS_M: f32 = 0.05;
+
+        let flywheel_radius_m = match config {
+            Some(cfg) => cfg
+                .get::<f32>("flywheel_radius")?
+                .unwrap_or(DEFAULT_FLYWHEEL_RADIUS_M),
+            None => DEFAULT_FLYWHEEL_RADIUS_M,
+        };
+        if flywheel_radius_m <= 0.0 {
+            return Err(CuError::from("flywheel_radius must be greater than zero"));
+        }
+
+        Ok(Self {
+            flywheel_radius: Length::new::<meter>(flywheel_radius_m),
+        })
+    }
+
+    fn process(
+        &mut self,
+        _ctx: &cu29::prelude::CuContext,
+        input: &Self::Input<'_>,
+        output: &mut Self::Output<'_>,
+    ) -> CuResult<()> {
+        let (muzzle_velocity_msg, turret_position_msg) = *input;
+        let (Some(muzzle_velocity), Some(turret_position)) =
+            (muzzle_velocity_msg.payload(), turret_position_msg.payload())
+        else {
+            return Ok(());
+        };
+
+        output.set_payload(Self::assemble(
+            *muzzle_velocity,
+            *turret_position,
+            self.flywheel_radius,
+        ));
         Ok(())
     }
 }

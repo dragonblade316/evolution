@@ -16,7 +16,6 @@ pub enum SuperState {
     Outtaking,
     Shooting,
     WalkAndTalk, //A nickname for the state where the robot intakes and shoots at the same time.
-    Climb
 }
 
 impl Default for SuperState {

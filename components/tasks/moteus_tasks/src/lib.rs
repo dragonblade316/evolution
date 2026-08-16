@@ -1,4 +1,4 @@
-use common::DiffDriveSpeeds;
+use common::{DiffDriveSpeeds, TurretState};
 use cu29::{
     config::ComponentConfig,
     cutask::{CuMsg, CuTask, Freezable},
@@ -65,5 +65,95 @@ impl CuTask for MoteusDiff {
             right: Velocity::new::<meter_per_second>(right.data.vel.get::<radian_per_second>() * r),
         });
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MoteusTurretStateAssembler — flywheel/turret MoteusData → TurretState
+// ---------------------------------------------------------------------------
+
+type FlywheelMoteusData = MoteusData;
+type TurretMoteusData = MoteusData;
+
+/// Combines flywheel and turret motor telemetry into the turret state consumed
+/// by turret control tasks.
+///
+/// The flywheel speed comes from the flywheel motor velocity, and the turret
+/// motor supplies the turret position.
+#[derive(Reflect)]
+pub struct MoteusTurretStateAssembler {}
+
+impl Freezable for MoteusTurretStateAssembler {}
+
+impl MoteusTurretStateAssembler {
+    fn assemble(flywheel: &MoteusData, turret: &MoteusData) -> TurretState {
+        TurretState {
+            flywheel: flywheel.data.vel,
+            position: turret.data.pos,
+        }
+    }
+}
+
+impl CuTask for MoteusTurretStateAssembler {
+    type Input<'m> = input_msg!('m, FlywheelMoteusData, TurretMoteusData);
+    type Output<'m> = output_msg!(TurretState);
+    type Resources<'r> = ();
+
+    fn new(
+        _config: Option<&ComponentConfig>,
+        _resources: Self::Resources<'_>,
+    ) -> CuResult<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self {})
+    }
+
+    fn process(
+        &mut self,
+        _ctx: &cu29::prelude::CuContext,
+        input: &Self::Input<'_>,
+        output: &mut Self::Output<'_>,
+    ) -> CuResult<()> {
+        let (flywheel_msg, turret_msg) = *input;
+        let (Some(flywheel), Some(turret)) = (flywheel_msg.payload(), turret_msg.payload()) else {
+            return Ok(());
+        };
+
+        output.set_payload(Self::assemble(flywheel, turret));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cu29::units::si::{
+        angle::degree,
+        angular_velocity::revolution_per_minute,
+        f32::{Angle, AngularVelocity},
+    };
+
+    #[test]
+    fn assembles_turret_state_from_the_two_motor_messages() {
+        let flywheel = MoteusData {
+            data: common::MotorData {
+                vel: AngularVelocity::new::<revolution_per_minute>(4_200.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let turret = MoteusData {
+            data: common::MotorData {
+                pos: Angle::new::<degree>(135.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let state = MoteusTurretStateAssembler::assemble(&flywheel, &turret);
+
+        assert_eq!(state.flywheel.get::<revolution_per_minute>(), 4_200.0);
+        assert_eq!(state.position.get::<degree>(), 135.0);
     }
 }
