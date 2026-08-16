@@ -5,7 +5,7 @@ members = [
     "apps/proto",
     "components/bridges/moteus_bridge", "components/tasks/diffdrive",
     "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/accel_limiter",
-    "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/payloads/driver_station", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods", "components/sources/BNOSource"]
+    "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/payloads/driver_station", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods", "components/sources/BNOSource", "external/evograph", "components/tasks/allience_spesific_tasks", "components/tasks/apriltag_tasks"]
 resolver = "2"
 
 [profile.dev]

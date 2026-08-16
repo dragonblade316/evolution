@@ -1,0 +1,23 @@
+[package]
+name = "evograph"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cargo_metadata = "0.23"
+eframe = { version = "0.35", features = ["persistence"] }
+egui-snarl = { version = "0.11", features = ["serde"] }
+notify = "8.2"
+petgraph = "0.8"
+proc-macro2 = "1"
+quote = "1"
+rfd = "0.17"
+ron = "0.12"
+ronin-core = "0.1"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+syn = { version = "2", features = ["full", "visit", "extra-traits"] }
+tempfile = "3"
+thiserror = "2"
+toml_edit = "0.25"
+walkdir = "2"

@@ -47,6 +47,10 @@
             opencv4
             apriltag
 
+            just
+
+            wireviz
+
             pkg-config
             mujoco
 

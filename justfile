@@ -1,5 +1,9 @@
 # Workspace automation helpers.
 
+# Open a Copper app in Evograph. Usage: just evograph masterpiece
+evograph app:
+  cargo run -p evograph -- "apps/{{app}}"
+
 # Render the execution DAG from the app config.
 rcfg:
   #!/usr/bin/env bash
