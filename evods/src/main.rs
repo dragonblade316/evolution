@@ -3,6 +3,8 @@ use std::time::Duration;
 use eframe::egui;
 use tokio::sync::{mpsc, watch};
 
+mod cu29;
+
 /// Latest joystick snapshot. Written by `joy_runtime` (std thread), read by
 /// `zruntime` (tokio thread) via a `tokio::sync::watch`.
 pub type PadState = common::GamePadState;
@@ -10,21 +12,17 @@ pub type PadState = common::GamePadState;
 /// Commands the UI (main/egui thread) sends down to `zruntime`.
 #[derive(Debug)]
 pub enum UiCommand {
-    /// Placeholder — replace with real commands later (enable, disable, mode, …).
-    Ping,
+    SetAllience(common::Allience),
+    ESTOP
 }
 
 /// Status / telemetry `zruntime` pushes back up to the UI.
 #[derive(Debug)]
 pub enum RobotStatus {
-    /// Placeholder — replace with real status later (connection, voltage, …).
-    Pong,
+    Connected,
+    Disconnected,
 }
 
-/// Runs on a plain OS thread with no async runtime.
-///
-/// Polls the gamepad and publishes the latest snapshot over the `watch`
-/// channel. `watch::Sender::send` is sync, so no tokio runtime is needed here.
 fn joy_runtime(pad_tx: watch::Sender<PadState>) {
     println!("[joy] thread started");
     let state = PadState::default();
@@ -39,11 +37,6 @@ fn joy_runtime(pad_tx: watch::Sender<PadState>) {
     }
 }
 
-/// Runs on its own OS thread hosting a tokio runtime.
-///
-/// Reads the latest joystick snapshot from the `watch` receiver, handles UI
-/// commands coming down from the egui thread, and pushes status updates back
-/// up to it.
 fn zruntime(
     mut pad_rx: watch::Receiver<PadState>,
     mut cmd_rx: mpsc::Receiver<UiCommand>,
@@ -55,6 +48,7 @@ fn zruntime(
         .build()
         .expect("failed to build tokio runtime");
 
+    let mut ds_state = cu29::payloads::DsTxMsg::default();
 
 
     runtime.block_on(async move {
@@ -67,6 +61,7 @@ fn zruntime(
             tokio::select! {
                 Ok(()) = pad_rx.changed() => {
                     let _latest = pad_rx.borrow().clone();
+
                 }
                 Some(cmd) = cmd_rx.recv() => {
                 }
@@ -87,8 +82,6 @@ fn main() -> eframe::Result<()> {
 
     // zruntime -> UI status.
     let (status_tx, status_rx) = mpsc::channel::<RobotStatus>(32);
-
-    zenoh::
 
     // Spawn the two background workers up front, before the UI starts.
     std::thread::spawn(move || joy_runtime(pad_tx));
@@ -141,7 +134,7 @@ impl eframe::App for EvodsApp {
 
             if ui.button("Ping zruntime").clicked() {
                 // Non-blocking send from the UI thread.
-                let _ = self.cmd_tx.try_send(UiCommand::Ping);
+                let _ = self.cmd_tx.try_send(UiCommand::ESTOP);
             }
 
             ui.separator();

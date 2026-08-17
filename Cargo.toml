@@ -5,7 +5,7 @@ members = [
     "apps/proto",
     "components/bridges/moteus_bridge", "components/tasks/diffdrive",
     "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/accel_limiter",
-    "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/payloads/driver_station", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods", "components/sources/BNOSource", "external/evograph", "components/tasks/allience_spesific_tasks", "components/tasks/apriltag_tasks"]
+    "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods", "components/sources/BNOSource", "external/evograph", "components/tasks/allience_spesific_tasks", "components/tasks/apriltag_tasks"]
 resolver = "2"
 
 [profile.dev]
@@ -38,7 +38,6 @@ serde_json = "1"
 dioxus = { version = "=0.7.9", features = ["desktop"] }
 #internal deps
 common = { path = "./components/payloads/common/" }
-driver_station = { path = "./components/payloads/driver_station/" }
 
 moteus_bridge = { path = "./components/bridges/moteus_bridge/" }
 oakd_lite_source = { path = "./components/sources/oakd_lite_source/" }
