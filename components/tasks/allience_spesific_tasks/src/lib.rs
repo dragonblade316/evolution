@@ -30,7 +30,7 @@ pub struct AllianceTransformSelector {
 impl AllianceTransformSelector {
     fn transform_for_status(&self, status: &DSStatus) -> Option<Transform3D<f64>> {
         match status {
-            DSStatus::DISCONNECTED => None,
+            DSStatus::DISCONNECTED | DSStatus::ESTOPPED => None,
             DSStatus::DISABLED(Allience::RED) | DSStatus::ENABLED(Allience::RED) => {
                 Some(self.red_transform)
             }

@@ -90,6 +90,7 @@ pub enum DSStatus {
     DISCONNECTED,
     DISABLED(Allience),
     ENABLED(Allience),
+    ESTOPPED
 }
 
 impl Default for DSStatus {
