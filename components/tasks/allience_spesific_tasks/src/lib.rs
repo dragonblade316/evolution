@@ -6,6 +6,8 @@ use cu29::{
     cutask::{CuMsg, CuTask, Freezable},
     input_msg, output_msg, CuError, CuResult,
 };
+use cu29::prelude::*;
+use cu29::reflect::Reflect;
 use cu_spatial_payloads::Transform3D;
 
 /// Selects a field transform based on the alliance reported by the driver station.
@@ -22,6 +24,8 @@ use cu_spatial_payloads::Transform3D;
 /// Each value is a 4 by 4 transformation matrix accepted by
 /// [`Transform3D::from_matrix`]. Disabled and enabled statuses select their recorded
 /// alliance; a disconnected status produces no output.
+#[derive(Reflect, Clone)]
+#[reflect(opaque, from_reflect = false, no_field_bounds)]
 pub struct AllianceTransformSelector {
     red_transform: Transform3D<f64>,
     blue_transform: Transform3D<f64>,

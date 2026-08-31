@@ -16,3 +16,7 @@ config:
 # FieldOrientedDiffDrive
 
 Field-oriented diff-drive controller. Computes heading error between desired and current global-frame velocity vectors (shortest path, wrapped), drives a PID to zero the error, and outputs robot-relative (forward, 0, theta_cmd). Forward speed is reduced as `|theta_cmd|` grows via `speed / (1 + turn_slowdown*|theta|)`.
+
+## Follow-up
+
+Replace the current `pid::Pid` implementation with a Copper `cu_pid` controller.

@@ -6,13 +6,85 @@ use cu29::{
     reflect::Reflect,
     units::si::{
         angular_velocity::radian_per_second,
-        f32::{Length, Velocity},
+        f32::{
+            Angle, AngularAcceleration, AngularVelocity, Length, Torque, Velocity,
+        },
         length::meter,
         velocity::meter_per_second,
     },
     CuResult,
 };
+use cu29::prelude::*;
 use moteus_bridge::messages::MoteusData;
+
+// ---------------------------------------------------------------------------
+// MoteusDataSplitter — MoteusData → individually wireable telemetry fields
+// ---------------------------------------------------------------------------
+
+/// Semantic aliases make fields with the same underlying Rust type distinct
+/// in Copper graph configuration while remaining directly compatible with
+/// consumers of those underlying types.
+pub type MoteusCanId = u8;
+pub type MoteusPosition = Angle;
+pub type MoteusVelocity = AngularVelocity;
+pub type MoteusAcceleration = Option<AngularAcceleration>;
+pub type MoteusTorque = Option<Torque>;
+pub type MoteusTemperature = f32;
+pub type MoteusVoltage = f32;
+pub type MoteusFault = i8;
+
+/// Splits one moteus telemetry message into independently wireable outputs.
+#[derive(Reflect)]
+pub struct MoteusDataSplitter {}
+
+impl Freezable for MoteusDataSplitter {}
+
+impl CuTask for MoteusDataSplitter {
+    type Input<'m> = input_msg!(MoteusData);
+    type Output<'m> = output_msg!(
+        'm,
+        MoteusCanId,
+        MoteusPosition,
+        MoteusVelocity,
+        MoteusAcceleration,
+        MoteusTorque,
+        MoteusTemperature,
+        MoteusVoltage,
+        MoteusFault
+    );
+    type Resources<'r> = ();
+
+    fn new(
+        _config: Option<&ComponentConfig>,
+        _resources: Self::Resources<'_>,
+    ) -> CuResult<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self {})
+    }
+
+    fn process(
+        &mut self,
+        _ctx: &cu29::prelude::CuContext,
+        input: &Self::Input<'_>,
+        output: &mut Self::Output<'_>,
+    ) -> CuResult<()> {
+        let Some(data) = input.payload() else {
+            return Ok(());
+        };
+
+        output.0.set_payload(data.canid);
+        output.1.set_payload(data.data.pos);
+        output.2.set_payload(data.data.vel);
+        output.3.set_payload(data.data.accel);
+        output.4.set_payload(data.data.torque);
+        output.5.set_payload(data.temp);
+        output.6.set_payload(data.voltage);
+        output.7.set_payload(data.fault);
+        Ok(())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // MoteusDiff — per-motor MoteusData → DiffDriveSpeeds
@@ -130,9 +202,79 @@ mod tests {
     use super::*;
     use cu29::units::si::{
         angle::degree,
+        angular_acceleration::radian_per_second_squared,
         angular_velocity::revolution_per_minute,
-        f32::{Angle, AngularVelocity},
+        f32::{Angle, AngularAcceleration, AngularVelocity, Torque},
+        torque::newton_meter,
     };
+
+    fn run_splitter(
+        input: CuMsg<MoteusData>,
+    ) -> <MoteusDataSplitter as CuTask>::Output<'static> {
+        let mut splitter = MoteusDataSplitter::new(None, ()).unwrap();
+        let (ctx, _mock) = cu29::prelude::CuContext::new_mock_clock();
+        let mut output = Default::default();
+        splitter.process(&ctx, &input, &mut output).unwrap();
+        output
+    }
+
+    #[test]
+    fn splits_all_moteus_data_fields() {
+        let input = CuMsg::new(Some(MoteusData {
+            canid: 4,
+            data: common::MotorData {
+                pos: Angle::new::<degree>(135.0),
+                vel: AngularVelocity::new::<revolution_per_minute>(4_200.0),
+                accel: Some(AngularAcceleration::new::<radian_per_second_squared>(12.5)),
+                torque: Some(Torque::new::<newton_meter>(3.25)),
+            },
+            temp: 41.5,
+            voltage: 23.8,
+            fault: -2,
+        }));
+
+        let output = run_splitter(input);
+
+        assert_eq!(output.0.payload(), Some(&4));
+        assert_eq!(output.1.payload().unwrap().get::<degree>(), 135.0);
+        assert_eq!(
+            output.2.payload().unwrap().get::<revolution_per_minute>(),
+            4_200.0
+        );
+        assert_eq!(
+            output.3.payload().unwrap().unwrap().get::<radian_per_second_squared>(),
+            12.5
+        );
+        assert_eq!(
+            output.4.payload().unwrap().unwrap().get::<newton_meter>(),
+            3.25
+        );
+        assert_eq!(output.5.payload(), Some(&41.5));
+        assert_eq!(output.6.payload(), Some(&23.8));
+        assert_eq!(output.7.payload(), Some(&-2));
+    }
+
+    #[test]
+    fn emits_no_outputs_without_an_input_payload() {
+        let output = run_splitter(CuMsg::new(None));
+
+        assert!(output.0.payload().is_none());
+        assert!(output.1.payload().is_none());
+        assert!(output.2.payload().is_none());
+        assert!(output.3.payload().is_none());
+        assert!(output.4.payload().is_none());
+        assert!(output.5.payload().is_none());
+        assert!(output.6.payload().is_none());
+        assert!(output.7.payload().is_none());
+    }
+
+    #[test]
+    fn emits_explicit_none_for_unavailable_optional_telemetry() {
+        let output = run_splitter(CuMsg::new(Some(MoteusData::default())));
+
+        assert_eq!(output.3.payload(), Some(&None));
+        assert_eq!(output.4.payload(), Some(&None));
+    }
 
     #[test]
     fn assembles_turret_state_from_the_two_motor_messages() {

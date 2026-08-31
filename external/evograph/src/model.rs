@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use petgraph::algo::is_cyclic_directed;
-use petgraph::graph::DiGraph;
 use serde::{Deserialize, Serialize};
 
 pub const NC_ENDPOINT: &str = "__nc__";
@@ -52,13 +50,6 @@ pub struct PortDescriptor {
     pub declared_type: String,
     pub serialized_type: String,
     pub canonical_type: String,
-}
-
-impl PortDescriptor {
-    pub fn compatible_with(&self, other: &Self) -> bool {
-        self.direction != other.direction
-            && normalize_type(&self.canonical_type) == normalize_type(&other.canonical_type)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -331,8 +322,6 @@ impl GraphDocument {
         }
 
         let mut connected_inputs = HashSet::new();
-        let mut graph = DiGraph::<(), ()>::new();
-        let indices: Vec<_> = self.nodes.iter().map(|_| graph.add_node(())).collect();
         for edge in &self.edges {
             let Some(source) = self.nodes.get(edge.source) else {
                 diagnostics.push(Diagnostic::error("Connection has a missing source node"));
@@ -368,32 +357,28 @@ impl GraphDocument {
                     target.id, input.name
                 )));
             }
+            let output_type = normalize_type(&output.canonical_type);
+            let input_type = normalize_type(&input.canonical_type);
+            if output_type != input_type
+                && !matches!(output_type.as_str(), "" | "_unresolved")
+                && !matches!(input_type.as_str(), "" | "_unresolved")
+            {
+                diagnostics.push(Diagnostic::warning(format!(
+                    "Connection '{}.{}' -> '{}.{}' has mismatched types: '{}' -> '{}'",
+                    source.id,
+                    output.name,
+                    target.id,
+                    input.name,
+                    output.declared_type,
+                    input.declared_type,
+                )));
+            }
             if !connected_inputs.insert((edge.target, edge.target_port)) {
                 diagnostics.push(Diagnostic::error(format!(
                     "Input '{}' on '{}' has more than one producer",
                     input.name, target.id
                 )));
             }
-            if !output.compatible_with(input) && !source.unresolved && !target.unresolved {
-                diagnostics.push(Diagnostic::error(format!(
-                    "Type mismatch: {} ({}) cannot connect to {} ({})",
-                    source.id, output.declared_type, target.id, input.declared_type
-                )));
-            }
-            if edge.source == edge.target {
-                diagnostics.push(Diagnostic::error(format!(
-                    "Node '{}' cannot connect to itself",
-                    source.id
-                )));
-            } else if let (Some(src), Some(dst)) =
-                (indices.get(edge.source), indices.get(edge.target))
-            {
-                graph.add_edge(*src, *dst, ());
-            }
-        }
-
-        if is_cyclic_directed(&graph) {
-            diagnostics.push(Diagnostic::error("The task graph contains a cycle"));
         }
 
         for (node_index, node) in self.nodes.iter().enumerate() {
@@ -481,17 +466,11 @@ impl GraphDocument {
             .get(source)
             .and_then(|node| node.outputs.get(source_port))
             .ok_or_else(|| "Missing output port".to_string())?;
-        let input = self
+        let _input = self
             .nodes
             .get(target)
             .and_then(|node| node.inputs.get(target_port))
             .ok_or_else(|| "Missing input port".to_string())?;
-        if !output.compatible_with(input) {
-            return Err(format!(
-                "{} is not compatible with {}",
-                output.declared_type, input.declared_type
-            ));
-        }
         if self
             .edges
             .iter()
@@ -508,14 +487,6 @@ impl GraphDocument {
             extra_fields: BTreeMap::new(),
         };
         self.edges.push(candidate);
-        if self
-            .diagnostics()
-            .iter()
-            .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("cycle"))
-        {
-            self.edges.pop();
-            return Err("That connection would create a cycle".to_string());
-        }
         Ok(())
     }
 
@@ -591,24 +562,6 @@ fn to_snake_case(value: &str) -> String {
 mod tests {
     use super::*;
 
-    fn port(direction: PortDirection, declared: &str, canonical: &str) -> PortDescriptor {
-        PortDescriptor {
-            name: declared.to_string(),
-            direction,
-            ordinal: 0,
-            declared_type: declared.to_string(),
-            serialized_type: declared.to_string(),
-            canonical_type: canonical.to_string(),
-        }
-    }
-
-    #[test]
-    fn aliases_compare_by_canonical_type() {
-        let output = port(PortDirection::Output, "LeftMotorCmd", "common::MotorCmd");
-        let input = port(PortDirection::Input, "common::MotorCmd", "common::MotorCmd");
-        assert!(output.compatible_with(&input));
-    }
-
     #[test]
     fn ids_are_stable_and_unique() {
         let mut document = GraphDocument::default();
@@ -645,5 +598,73 @@ mod tests {
             expression: "not valid +".into(),
         });
         assert!(document.has_hard_errors());
+    }
+
+    #[test]
+    fn mismatched_connection_types_are_advisory_warnings() {
+        let mut document = GraphDocument {
+            nodes: vec![
+                GraphNode {
+                    id: "source".into(),
+                    component_type: "Source".into(),
+                    kind: ComponentKind::Source,
+                    inputs: vec![],
+                    outputs: vec![PortDescriptor {
+                        name: "out".into(),
+                        direction: PortDirection::Output,
+                        ordinal: 0,
+                        declared_type: "Angle".into(),
+                        serialized_type: "Angle".into(),
+                        canonical_type: "Angle".into(),
+                    }],
+                    config: EditableConfig::default(),
+                    channels: vec![],
+                    background: None,
+                    run_in_sim: None,
+                    logging_enabled: None,
+                    pending_workspace_dependency: None,
+                    unresolved: false,
+                    extra_fields: BTreeMap::new(),
+                },
+                GraphNode {
+                    id: "target".into(),
+                    component_type: "Target".into(),
+                    kind: ComponentKind::Sink,
+                    inputs: vec![PortDescriptor {
+                        name: "in".into(),
+                        direction: PortDirection::Input,
+                        ordinal: 0,
+                        declared_type: "Velocity".into(),
+                        serialized_type: "Velocity".into(),
+                        canonical_type: "Velocity".into(),
+                    }],
+                    outputs: vec![],
+                    config: EditableConfig::default(),
+                    channels: vec![],
+                    background: None,
+                    run_in_sim: None,
+                    logging_enabled: None,
+                    pending_workspace_dependency: None,
+                    unresolved: false,
+                    extra_fields: BTreeMap::new(),
+                },
+            ],
+            edges: vec![GraphEdge {
+                source: 0,
+                source_port: 0,
+                target: 1,
+                target_port: 0,
+                message_type: "Angle".into(),
+                extra_fields: BTreeMap::new(),
+            }],
+            ..GraphDocument::default()
+        };
+
+        let diagnostics = document.diagnostics();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Warning
+                && diagnostic.message.contains("mismatched types")
+        }));
+        assert!(!document.has_hard_errors());
     }
 }

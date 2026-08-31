@@ -10,7 +10,9 @@ const DEFAULT_UNDEPLOYED_US: f64 = 1000.0;
 const DEFAULT_CHANNEL: u8 = 0;
 
 #[derive(Reflect)]
+#[reflect(from_reflect = false, no_field_bounds)]
 pub struct BinaryServo {
+    #[reflect(ignore)]
     pwm: Pwm,
     deployed_pulse: Duration,
     undeployed_pulse: Duration,

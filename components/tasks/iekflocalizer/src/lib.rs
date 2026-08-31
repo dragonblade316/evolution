@@ -15,6 +15,8 @@ use cu29::{input_msg, output_msg};
 use sophus::lie::{Isometry2F64, Rotation2};
 use sophus::nalgebra::{Matrix3, Vector2, Vector3};
 
+
+#[derive(Clone)]
 struct IEKF {
     pose: Isometry2F64,
     P: Matrix3<f64>,
@@ -59,6 +61,7 @@ impl IEKF {
     }
 }
 
+#[derive(Clone)]
 struct TimeMachineIEKF {
     iekf: IEKF,
     //not technically needed but whatev
@@ -161,7 +164,8 @@ fn iso_to_pose(iso: &Isometry2F64) -> Pose<f64> {
 
 
 
-#[derive(Reflect)]
+#[derive(Reflect, Clone)]
+#[reflect(opaque, from_reflect = false, no_field_bounds)]
 pub struct IEKFPoseEstimator {
     tm: TimeMachineIEKF,
     speeds: ChassisSpeeds

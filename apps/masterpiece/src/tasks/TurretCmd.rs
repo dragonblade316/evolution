@@ -1,5 +1,6 @@
 
 use cu29::{
+    prelude::*,
     cutask::{CuMsg, CuTask, Freezable},
     input_msg, output_msg,
     units::si::{angular_velocity::revolution_per_minute, f32::AngularVelocity},
@@ -8,8 +9,8 @@ use common::{MotorCMD, TurretState};
 
 
 use crate::messages::SuperState;
-
-struct TurretCMD {
+#[derive(Reflect)]
+pub struct TurretCMD {
     max_turret_velocity: Option<AngularVelocity>,
     idle_flywheel_speed: AngularVelocity,
 }
@@ -18,8 +19,8 @@ impl Freezable for TurretCMD {
 
 }
 
-type AngleMotorCmd = MotorCMD;
-type FlywheelMotorCmd = MotorCMD;
+pub type AngleMotorCmd = MotorCMD;
+pub type FlywheelMotorCmd = MotorCMD;
 
 impl CuTask for TurretCMD {
 

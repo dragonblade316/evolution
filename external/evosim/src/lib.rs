@@ -197,10 +197,10 @@ impl DiffDrive {
 
         // 3. Translate to robot center.  When the axle is offset from the
         //    center, a turning robot experiences a sideways velocity at the
-        //    center: v_y = ω · axle_offset (robot frame).
+        //    center: v_x = -ω · axle_offset (robot frame).
         let theta_rad = self.theta.get::<radian>();
-        let v_x = v_axle * theta_rad.cos() - omega * self.axle_offset.get::<meter>() * theta_rad.sin();
-        let v_y = v_axle * theta_rad.sin() + omega * self.axle_offset.get::<meter>() * theta_rad.cos();
+        let v_x = -v_axle * theta_rad.sin() - omega * self.axle_offset.get::<meter>() * theta_rad.cos();
+        let v_y = v_axle * theta_rad.cos() - omega * self.axle_offset.get::<meter>() * theta_rad.sin();
 
         self.theta = Angle::new::<radian>(theta_rad + omega * dt);
         self.x = Length::new::<meter>(self.x.get::<meter>() + v_x * dt);

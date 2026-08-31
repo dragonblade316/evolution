@@ -1,10 +1,12 @@
 
 use cu29::{clock::{CuDuration, CuInstant, Instant}, cutask::{CuMsg, CuTask, Freezable}, input_msg, output_msg, units::si::{angular_velocity::revolution_per_minute, f32::AngularVelocity}};
 use common::{GamePadState, MotorCMD};
+use cu29::prelude::*;
 
 
 use crate::{messages::SuperState};
 
+#[derive(Clone)]
 enum IntakeState {
     IDLE,
     PASS,
@@ -13,7 +15,9 @@ enum IntakeState {
     OUTTAKING
 }
 
-struct S1IntakeStateMachine {
+#[derive(Clone, Reflect)]
+#[reflect(opaque, from_reflect = false, no_field_bounds)]
+pub struct S1IntakeStateMachine {
     state: IntakeState,
     retract_time: Instant,
     intake_speed: AngularVelocity,

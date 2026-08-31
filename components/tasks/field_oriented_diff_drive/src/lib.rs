@@ -6,6 +6,8 @@ use cu29::{
         velocity::meter_per_second,
     }
 };
+use cu29::prelude::*;
+use cu29::reflect::Reflect;
 use pid::Pid;
 
 //note: this is one of the few times I think the AI has writen better code than I would have. Turns out detailed prompts are good.
@@ -27,7 +29,10 @@ use pid::Pid;
 ///   kd             — derivative gain            (default: 0.0)
 ///   output_limit   — max angular velocity rad/s (default: 5.0)
 ///   turn_slowdown  — forward reduction factor   (default: 0.5)
+#[derive(Reflect)]
+#[reflect(from_reflect = false, no_field_bounds)]
 pub struct FieldOrientedDiffDrive {
+    #[reflect(ignore)]
     pid: Pid<f32>,
     turn_slowdown: f32,
 }

@@ -5,10 +5,12 @@ use cu29::{
     input_msg, output_msg,
     CuResult,
 };
+use cu29::prelude::*;
 use cu29::units::si::angle::radian;
 use cu29::units::si::f32::{Angle, Velocity};
 use cu29::units::si::velocity::meter_per_second;
-use cu_spatial_payloads::Pose;
+use cu29::reflect::Reflect;
+use cu_spatial_payloads::{Pose, Transform3D};
 
 use std::f64::consts::PI;
 use eqsolver::nalgebra::DVector;
@@ -32,14 +34,22 @@ impl SecondOrderSystem for Ball {
     }
 }
 
-struct SOTM {
-    /// 3D position of the goal in world frame [x, y, z]
-    goal_position: [f64; 3],
+#[derive(Reflect)]
+pub struct SOTM {
     /// 3D position of the turret relative to the robot center [x, y, z]
     turret_offset: [f64; 3],
 }
 
 impl SOTM {
+
+    /// Extract the target point from its world-frame transform.
+    ///
+    /// The target orientation is intentionally ignored: SOTM aims at the
+    /// transform's translation, expressed in the same world frame as the
+    /// robot pose.
+    fn target_position(target: &Transform3D<f64>) -> [f64; 3] {
+        target.translation().map(|coordinate| coordinate.raw())
+    }
 
     ///qt: The position of the target relative to the robot. [x, y] (typically only x will change since it is the distance of the robot from the goal)
     ///vcx: the velocity that the robot is moving toward the goal.
@@ -115,7 +125,7 @@ impl Freezable for SOTM {
 }
 
 impl CuTask for SOTM {
-    type Input<'m> = input_msg!((Pose<f64>, ChassisSpeeds));
+    type Input<'m> = input_msg!('m, Pose<f64>, Transform3D<f64>, ChassisSpeeds);
 
     type Output<'m> = output_msg!('m, TurretAngle, MuzzleVelocity);
 
@@ -124,18 +134,13 @@ impl CuTask for SOTM {
     fn new(config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
     where
         Self: Sized {
-        const DEFAULT_GOAL_POSITION: [f64; 3] = [4.0, 2.0, 2.5];
         const DEFAULT_TURRET_OFFSET: [f64; 3] = [0.1, 0.0, 0.5];
-
-        let goal_position = config
-            .and_then(|cfg| cfg.get_value::<[f64; 3]>("goal_position").ok().flatten())
-            .unwrap_or(DEFAULT_GOAL_POSITION);
 
         let turret_offset = config
             .and_then(|cfg| cfg.get_value::<[f64; 3]>("turret_offset").ok().flatten())
             .unwrap_or(DEFAULT_TURRET_OFFSET);
 
-        Ok(Self { goal_position, turret_offset })
+        Ok(Self { turret_offset })
     }
 
     fn process(
@@ -144,11 +149,15 @@ impl CuTask for SOTM {
         input: &Self::Input<'_>,
         output: &mut Self::Output<'_>,
     ) -> CuResult<()> {
-        let input_msg = input;
-        let (robot_pose, robot_speeds) = match input_msg.payload() {
-            Some(p) => p,
-            None => return Ok(()),
+        let (robot_pose_msg, target_msg, robot_speeds_msg) = *input;
+        let (Some(robot_pose), Some(target), Some(robot_speeds)) = (
+            robot_pose_msg.payload(),
+            target_msg.payload(),
+            robot_speeds_msg.payload(),
+        ) else {
+            return Ok(());
         };
+        let goal_position = Self::target_position(target);
 
         // --- Robot state ---
         let robot_translation = robot_pose.translation();
@@ -156,11 +165,11 @@ impl CuTask for SOTM {
         let robot_y = robot_translation[1].raw();
         let robot_z = robot_translation[2].raw();
 
-// Extract yaw from the 3x3 rotation matrix. `Pose::rotation()` returns the
-// raw dimensionless rotation matrix as `[[T; 3]; 3]` (see cu-spatial-payloads
-// 1.1.0 docs), so the element access is already an `f64` — no `.raw()` needed.
-let rot = robot_pose.rotation();
-let heading = f64::atan2(rot[1][0], rot[0][0]);
+        // Extract yaw from the 3x3 rotation matrix. `Pose::rotation()` returns
+        // the raw dimensionless rotation matrix as `[[T; 3]; 3]`, so the
+        // element access is already an `f64` — no `.raw()` needed.
+        let rot = robot_pose.rotation();
+        let heading = f64::atan2(rot[1][0], rot[0][0]);
 
         let robot_vx = robot_speeds.x.raw() as f64;
         let robot_vy = robot_speeds.y.raw() as f64;
@@ -184,8 +193,8 @@ let heading = f64::atan2(rot[1][0], rot[0][0]);
 
         // --- Decompose into parallel/perpendicular axes relative to goal ---
         // Vector from turret to goal (ground plane)
-        let dx = self.goal_position[0] - turret_x;
-        let dy = self.goal_position[1] - turret_y;
+        let dx = goal_position[0] - turret_x;
+        let dy = goal_position[1] - turret_y;
         let dist_to_goal = f64::hypot(dx, dy);
 
         // Unit vectors: toward-goal (parallel) and perpendicular (CCW 90°)
@@ -201,7 +210,7 @@ let heading = f64::atan2(rot[1][0], rot[0][0]);
         let v_perpendicular = turret_vx * px + turret_vy * py;
 
         // Vertical difference from turret to goal
-        let dz = self.goal_position[2] - turret_z;
+        let dz = goal_position[2] - turret_z;
 
         // Direction from turret to goal in world frame
         let goal_direction = f64::atan2(dy, dx);
@@ -245,4 +254,48 @@ pub fn solve_muzzle_velocity(
     SOTM::solve_range([distance, dz], 0.0, hood_angle_deg)
         .map(|[v, _]| v)
         .filter(|&v| v >= MIN_VELOCITY && v <= max_velocity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target_transform(x: f64, y: f64, z: f64) -> Transform3D<f64> {
+        Transform3D::from_matrix([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [x, y, z, 1.0],
+        ])
+    }
+
+    #[test]
+    fn target_position_uses_world_translation() {
+        let target = target_transform(4.0, 2.0, 2.5);
+
+        assert_eq!(SOTM::target_position(&target), [4.0, 2.0, 2.5]);
+    }
+
+    #[test]
+    fn target_rotation_does_not_change_target_position() {
+        let target = Transform3D::from_matrix([
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [4.0, 2.0, 2.5, 1.0],
+        ]);
+
+        assert_eq!(SOTM::target_position(&target), [4.0, 2.0, 2.5]);
+    }
+
+    #[test]
+    fn different_target_transforms_produce_different_goal_positions() {
+        let near_target = target_transform(4.0, 2.0, 2.5);
+        let far_target = target_transform(6.0, 2.0, 2.5);
+
+        assert_ne!(
+            SOTM::target_position(&near_target),
+            SOTM::target_position(&far_target)
+        );
+    }
 }

@@ -4,6 +4,7 @@ use cu29::units::si::f32::*;
 use cu29::units::si::f32::Torque;
 use cu29::{reflect::Reflect, units::si::velocity::meter_per_second};
 use serde::{Deserialize, Serialize};
+use cu29::prelude::*;
 
 
 //kinematics

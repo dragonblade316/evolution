@@ -39,7 +39,7 @@ struct MoteusMotor {
 /// - `max_torque`    → `maximum_torque` (N·m)
 /// - `position_min`  → clamps commanded position (rev); not a separate wire field
 /// - `position_max`  → clamps commanded position (rev); not a separate wire field
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Reflect)]
 struct TxCommandConfig {
     kp: Option<f32>,
     kd: Option<f32>,
@@ -100,6 +100,7 @@ impl TxCommandConfig {
     }
 }
 
+#[derive(Debug)]
 struct MoteusChannelConfig<Id: Copy> {
     id: Id,
     can_id: usize,
@@ -108,6 +109,8 @@ struct MoteusChannelConfig<Id: Copy> {
     tx_cmd: TxCommandConfig,
 }
 
+#[derive(Reflect)]
+#[reflect(from_reflect = false, no_field_bounds, type_path = false)]
 pub struct MoteusBridge<Tx, Rx>
 where
     Tx: BridgeChannelSet + 'static,
@@ -115,8 +118,39 @@ where
     Tx::Id: Send + Sync + 'static,
     Rx::Id: Send + Sync + 'static,
 {
+    #[reflect(ignore)]
     tx_channels: Vec<MoteusChannelConfig<Tx::Id>>,
+    #[reflect(ignore)]
     rx_channels: Vec<MoteusChannelConfig<Rx::Id>>,
+}
+
+
+impl<Tx, Rx> cu29::reflect::TypePath for MoteusBridge<Tx, Rx>
+where
+    Tx: BridgeChannelSet + 'static,
+    Rx: BridgeChannelSet + 'static,
+    Tx::Id: Send + Sync + 'static,
+    Rx::Id: Send + Sync + 'static,
+{
+    fn type_path() -> &'static str {
+        "moteus_bridge::MoteusBridge"
+    }
+
+    fn short_type_path() -> &'static str {
+        "MoteusBridge"
+    }
+
+    fn type_ident() -> Option<&'static str> {
+        Some("MoteusBridge")
+    }
+
+    fn crate_name() -> Option<&'static str> {
+        Some("moteus_bridge")
+    }
+
+    fn module_path() -> Option<&'static str> {
+        Some("moteus_bridge")
+    }
 }
 
 impl<Tx, Rx> MoteusBridge<Tx, Rx>

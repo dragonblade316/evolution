@@ -406,6 +406,7 @@ pub struct EvographApp {
     editor: EditorState,
     selected_node: Option<NodeId>,
     graph_widget_id: egui::Id,
+    selection_epoch: u64,
     node_menu_query: String,
     camera: CameraState,
     restore_camera: bool,
@@ -418,7 +419,6 @@ pub struct EvographApp {
     show_transform_wizard: bool,
     watcher: Option<RecommendedWatcher>,
     watch_rx: Option<Receiver<notify::Result<Event>>>,
-    reindex_after: Option<Instant>,
     layout_path: Option<PathBuf>,
     layout: EvoNodeLayout,
     layout_save_after: Option<Instant>,
@@ -433,6 +433,7 @@ impl EvographApp {
             editor: EditorState::new(),
             selected_node: None,
             graph_widget_id: egui::Id::new("evograph_graph"),
+            selection_epoch: 0,
             node_menu_query: String::new(),
             camera: CameraState::default(),
             restore_camera: true,
@@ -445,7 +446,6 @@ impl EvographApp {
             show_transform_wizard: false,
             watcher: None,
             watch_rx: None,
-            reindex_after: None,
             layout_path: None,
             layout: EvoNodeLayout {
                 version: layout_version(),
@@ -554,11 +554,7 @@ impl EvographApp {
             }
         }
         if relevant {
-            self.reindex_after = Some(Instant::now() + Duration::from_millis(500));
-        }
-        if self.reindex_after.is_some_and(|deadline| Instant::now() >= deadline) {
-            self.reindex_after = None;
-            self.reindex();
+            self.status = "Sources changed; click Reindex to refresh components".into();
         }
     }
 
@@ -600,7 +596,7 @@ impl EvographApp {
 
     fn rebuild_editor(&mut self) {
         self.editor = EditorState::new();
-        self.selected_node = None;
+        self.clear_node_selection();
         let Some(document) = self.config.as_ref().map(|config| config.document.clone()) else {
             return;
         };
@@ -756,6 +752,11 @@ impl EvographApp {
             .position(|node| &node.id == model_id)
     }
 
+    fn clear_node_selection(&mut self) {
+        self.selected_node = None;
+        self.selection_epoch = self.selection_epoch.wrapping_add(1);
+    }
+
     fn graph_positions(&self) -> BTreeMap<String, NodePosition> {
         self.editor
             .nodes_pos_ids()
@@ -857,10 +858,6 @@ impl EvographApp {
 
     fn save(&mut self, overwrite_external: bool) {
         let Some(config) = &mut self.config else { return };
-        if config.document.has_hard_errors() {
-            self.status = "Save blocked by validation errors".into();
-            return;
-        }
         if !overwrite_external && config.disk_changed() {
             self.overwrite_dialog = true;
             return;
@@ -936,7 +933,16 @@ impl EvographApp {
                 ui.selectable_value(&mut self.view, View::Monitors, "Monitors");
                 ui.separator();
                 if self.view == View::Graph && self.config.is_some() {
-                    ui.label("Right-click the canvas to add a node");
+                    if ui
+                        .add_enabled(
+                            self.selected_node.is_some(),
+                            egui::Button::new("Clear selection"),
+                        )
+                        .clicked()
+                    {
+                        self.clear_node_selection();
+                    }
+                    ui.label("Right-click canvas to add · Shift-click selects · Esc clears");
                     ui.separator();
                 }
                 if self.dirty {
@@ -958,7 +964,7 @@ impl EvographApp {
             let mut actions = Vec::new();
             let mut camera_changed = false;
             let widget = SnarlWidget::new()
-                .id(self.graph_widget_id)
+                .id(self.graph_widget_id.with(self.selection_epoch))
                 .style(SnarlStyle {
                     min_scale: Some(0.2),
                     max_scale: Some(2.0),
@@ -979,10 +985,18 @@ impl EvographApp {
             };
             widget.show(&mut self.editor, &mut viewer, ui);
             let selected = widget.get_selected_nodes(ui);
-            self.selected_node = self
-                .selected_node
-                .filter(|node| selected.contains(node))
-                .or_else(|| selected.last().copied());
+            let clear_selection_requested = !ui.ctx().egui_wants_keyboard_input()
+                && ui.ctx().input_mut(|input| {
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                });
+            if clear_selection_requested {
+                self.clear_node_selection();
+            } else {
+                self.selected_node = self
+                    .selected_node
+                    .filter(|node| selected.contains(node))
+                    .or_else(|| selected.last().copied());
+            }
             let delete_requested = !ui.ctx().egui_wants_keyboard_input()
                 && ui.ctx().input_mut(|input| {
                     input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
@@ -1295,7 +1309,7 @@ impl EvographApp {
                     ui.label(if diagnostics.is_empty() {
                         "Ready to save"
                     } else {
-                        "Errors block saving; incomplete inputs are warnings"
+                        "Diagnostics are advisory"
                     });
                 });
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1361,7 +1375,7 @@ impl eframe::App for EvographApp {
             View::Monitors => self.monitors_view(ui),
         }
         self.overwrite_window(&ctx);
-        if self.reindex_after.is_some() || self.layout_save_after.is_some() {
+        if self.layout_save_after.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
@@ -1726,14 +1740,14 @@ mod tests {
     }
 
     #[test]
-    fn viewer_accepts_aliases_and_rejects_incompatible_connections() {
+    fn viewer_allows_mismatched_connections() {
         let accepted = attempt_viewer_connection("common::Payload");
         assert_eq!((accepted.0, accepted.1), (1, 1));
         assert!(accepted.2.is_empty());
 
-        let rejected = attempt_viewer_connection("OtherPayload");
-        assert_eq!((rejected.0, rejected.1), (0, 0));
-        assert!(rejected.2.contains("not compatible"));
+        let mismatched = attempt_viewer_connection("OtherPayload");
+        assert_eq!((mismatched.0, mismatched.1), (1, 1));
+        assert!(mismatched.2.is_empty());
     }
 
     #[test]

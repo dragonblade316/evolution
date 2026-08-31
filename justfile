@@ -15,7 +15,7 @@ rcfg:
 log:
   #!/usr/bin/env bash
   set -euo pipefail
-  APP_DIR="${APP_DIR:-cu_example_app}"
+  APP_DIR="${APP_DIR:-masterpiece}"
   APP_NAME="${APP_NAME:-${APP_DIR}}"
   RUST_BACKTRACE=1 cargo run -p "${APP_NAME}" --features=logreader --bin "${APP_NAME}-logreader" \
     apps/"${APP_DIR}"/logs/"${APP_NAME}".copper extract-text-log target/debug/cu29_log_index

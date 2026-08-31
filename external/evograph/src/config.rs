@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,8 +26,6 @@ pub enum ConfigError {
     Parse(String),
     #[error("cannot save because the file changed outside Evograph")]
     ExternalChange,
-    #[error("cannot save while hard validation errors remain")]
-    Validation,
     #[error("failed to write {path}: {source}")]
     Write {
         path: PathBuf,
@@ -58,12 +56,14 @@ impl ConfigFile {
         let parsed: RawRoot = copper_ron_options()
             .from_str(&source)
             .map_err(|error| ConfigError::Parse(error.to_string()))?;
-        let document = build_document(parsed, &source, catalog)?;
+        let original_document = build_document(parsed, &source, catalog)?;
+        let mut document = original_document.clone();
+        normalize_document_connection_order(&mut document);
         Ok(Self {
             path,
             original_hash: hash(&source),
             original_source: source,
-            original_document: document.clone(),
+            original_document,
             document,
         })
     }
@@ -75,9 +75,6 @@ impl ConfigFile {
     }
 
     pub fn rendered(&self) -> Result<String, ConfigError> {
-        if self.document.has_hard_errors() {
-            return Err(ConfigError::Validation);
-        }
         let mut source = self.original_source.clone();
         let monitor_field = if find_field_value_span(&source, "monitors").is_some() {
             "monitors"
@@ -369,6 +366,7 @@ fn build_document(
         .map(|(index, node)| (node.id.clone(), index))
         .collect();
     for (connection_index, connection) in raw.cnx.into_iter().enumerate() {
+        let canonical_message = catalog.canonical_type(&connection.msg);
         let (source_id, source_channel) = split_endpoint(&connection.src);
         let Some(&source) = node_by_id.get(source_id) else {
             continue;
@@ -378,6 +376,7 @@ fn build_document(
             PortDirection::Output,
             source_channel,
             &connection.msg,
+            &canonical_message,
             &[],
         );
         if connection.dst == NC_ENDPOINT {
@@ -398,6 +397,7 @@ fn build_document(
             PortDirection::Input,
             target_channel,
             &connection.msg,
+            &canonical_message,
             &occupied_inputs,
         );
         document.edges.push(GraphEdge {
@@ -440,6 +440,7 @@ fn ensure_port(
     direction: PortDirection,
     channel: Option<&str>,
     message: &str,
+    canonical_message: &str,
     unavailable: &[usize],
 ) -> usize {
     let ports = if direction == PortDirection::Input {
@@ -458,7 +459,7 @@ fn ensure_port(
         }
         return index;
     }
-    let normalized_message = normalize_type(message);
+    let normalized_message = normalize_type(canonical_message);
     if let Some(index) = ports.iter().enumerate().find_map(|(index, port)| {
         (!unavailable.contains(&index)
             && normalize_type(&port.serialized_type) == normalized_message)
@@ -657,6 +658,88 @@ fn render_bridges(document: &GraphDocument) -> String {
     render_list(&bridges, 1)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ConnectionOrderKey {
+    source: usize,
+    source_port: usize,
+    target: Option<(usize, usize)>,
+}
+
+fn order_connections(keys: &[ConnectionOrderKey]) -> Vec<usize> {
+    let mut successors = vec![Vec::new(); keys.len()];
+    let mut indegree = vec![0usize; keys.len()];
+    let mut constraints = BTreeSet::new();
+
+    for left in 0..keys.len() {
+        for right in (left + 1)..keys.len() {
+            let mut add_constraint = |before: usize, after: usize| {
+                if constraints.insert((before, after)) {
+                    successors[before].push(after);
+                    indegree[after] += 1;
+                }
+            };
+            if keys[left].source == keys[right].source {
+                match keys[left].source_port.cmp(&keys[right].source_port) {
+                    std::cmp::Ordering::Less => add_constraint(left, right),
+                    std::cmp::Ordering::Greater => add_constraint(right, left),
+                    std::cmp::Ordering::Equal => {}
+                }
+            }
+            if let (Some((left_target, left_port)), Some((right_target, right_port))) =
+                (keys[left].target, keys[right].target)
+                && left_target == right_target
+            {
+                match left_port.cmp(&right_port) {
+                    std::cmp::Ordering::Less => add_constraint(left, right),
+                    std::cmp::Ordering::Greater => add_constraint(right, left),
+                    std::cmp::Ordering::Equal => {}
+                }
+            }
+        }
+    }
+
+    let mut ready = (0..keys.len())
+        .filter(|index| indegree[*index] == 0)
+        .collect::<BTreeSet<_>>();
+    let mut ordered = Vec::with_capacity(keys.len());
+    while let Some(index) = ready.pop_first() {
+        ordered.push(index);
+        for successor in &successors[index] {
+            indegree[*successor] -= 1;
+            if indegree[*successor] == 0 {
+                ready.insert(*successor);
+            }
+        }
+    }
+
+    // Crossed source/target wiring can make positional Copper connections
+    // impossible to order perfectly. Preserve the original order for any
+    // cyclic remainder so the renderer remains deterministic.
+    if ordered.len() != keys.len() {
+        let emitted = ordered.iter().copied().collect::<BTreeSet<_>>();
+        ordered.extend((0..keys.len()).filter(|index| !emitted.contains(index)));
+    }
+    ordered
+}
+
+fn normalize_document_connection_order(document: &mut GraphDocument) {
+    let keys = document
+        .edges
+        .iter()
+        .map(|edge| ConnectionOrderKey {
+            source: edge.source,
+            source_port: edge.source_port,
+            target: Some((edge.target, edge.target_port)),
+        })
+        .collect::<Vec<_>>();
+    let ordered = order_connections(&keys);
+    let edges = ordered
+        .into_iter()
+        .map(|index| document.edges[index].clone())
+        .collect();
+    document.edges = edges;
+}
+
 fn render_connections(document: &GraphDocument) -> String {
     let mut connections = Vec::new();
     for edge in &document.edges {
@@ -670,7 +753,14 @@ fn render_connections(document: &GraphDocument) -> String {
             format!("msg: {},", ron_string(&edge.message_type)),
         ];
         append_extra(&mut fields, &edge.extra_fields);
-        connections.push(render_struct(&fields, 2));
+        connections.push((
+            ConnectionOrderKey {
+                source: edge.source,
+                source_port: edge.source_port,
+                target: Some((edge.target, edge.target_port)),
+            },
+            render_struct(&fields, 2),
+        ));
     }
     for (node_index, node) in document.nodes.iter().enumerate() {
         if node.kind == ComponentKind::Bridge {
@@ -685,17 +775,30 @@ fn render_connections(document: &GraphDocument) -> String {
                 continue;
             }
             let output = &node.outputs[output_index];
-            connections.push(render_struct(
-                &[
-                    format!("src: {},", ron_string(&node.id)),
-                    format!("dst: {},", ron_string(NC_ENDPOINT)),
-                    format!("msg: {},", ron_string(&output.serialized_type)),
-                ],
-                2,
+            connections.push((
+                ConnectionOrderKey {
+                    source: node_index,
+                    source_port: output_index,
+                    target: None,
+                },
+                render_struct(
+                    &[
+                        format!("src: {},", ron_string(&node.id)),
+                        format!("dst: {},", ron_string(NC_ENDPOINT)),
+                        format!("msg: {},", ron_string(&output.serialized_type)),
+                    ],
+                    2,
+                ),
             ));
         }
     }
-    render_list(&connections, 1)
+    let keys = connections.iter().map(|(key, _)| *key).collect::<Vec<_>>();
+    let ordered = order_connections(&keys);
+    let rendered = ordered
+        .into_iter()
+        .map(|index| connections[index].1.clone())
+        .collect::<Vec<_>>();
+    render_list(&rendered, 1)
 }
 
 fn endpoint_for(node: &GraphNode, direction: PortDirection, port: usize) -> String {
@@ -1084,6 +1187,100 @@ fn advance_state(bytes: &[u8], index: &mut usize, state: &mut ScanState) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_order_follows_source_and_target_ports() {
+        let keys = vec![
+            ConnectionOrderKey {
+                source: 0,
+                source_port: 1,
+                target: Some((1, 1)),
+            },
+            ConnectionOrderKey {
+                source: 0,
+                source_port: 0,
+                target: Some((1, 0)),
+            },
+            ConnectionOrderKey {
+                source: 0,
+                source_port: 2,
+                target: None,
+            },
+        ];
+        assert_eq!(order_connections(&keys), vec![1, 0, 2]);
+    }
+
+    #[test]
+    fn loaded_edges_are_normalized_before_the_next_save() {
+        let mut document = GraphDocument {
+            edges: vec![
+                GraphEdge {
+                    source: 0,
+                    source_port: 1,
+                    target: 1,
+                    target_port: 1,
+                    message_type: "B".into(),
+                    extra_fields: BTreeMap::new(),
+                },
+                GraphEdge {
+                    source: 0,
+                    source_port: 0,
+                    target: 1,
+                    target_port: 0,
+                    message_type: "A".into(),
+                    extra_fields: BTreeMap::new(),
+                },
+            ],
+            ..GraphDocument::default()
+        };
+
+        normalize_document_connection_order(&mut document);
+        assert_eq!(
+            document
+                .edges
+                .iter()
+                .map(|edge| edge.message_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["A", "B"]
+        );
+    }
+
+    #[test]
+    fn canonical_connection_type_reuses_declared_port() {
+        let mut node = GraphNode {
+            id: "solver".into(),
+            component_type: "solver::Task".into(),
+            kind: ComponentKind::Task,
+            inputs: vec![PortDescriptor {
+                name: "CurrentAngle".into(),
+                direction: PortDirection::Input,
+                ordinal: 0,
+                declared_type: "CurrentAngle".into(),
+                serialized_type: "turret_tasks::CurrentAngle".into(),
+                canonical_type: "cu29::units::si::f32::Angle".into(),
+            }],
+            outputs: vec![],
+            config: EditableConfig::default(),
+            channels: vec![],
+            background: None,
+            run_in_sim: None,
+            logging_enabled: None,
+            pending_workspace_dependency: None,
+            unresolved: false,
+            extra_fields: BTreeMap::new(),
+        };
+
+        let port = ensure_port(
+            &mut node,
+            PortDirection::Input,
+            None,
+            "moteus_tasks::MoteusPosition",
+            "cu29::units::si::f32::Angle",
+            &[],
+        );
+        assert_eq!(port, 0);
+        assert_eq!(node.inputs.len(), 1);
+    }
 
     #[test]
     fn finds_root_fields_without_matching_nested_config() {

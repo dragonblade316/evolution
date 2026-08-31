@@ -1,4 +1,5 @@
 use cu29::bincode::{Decode, Encode};
+use cu29::prelude::*;
 use cu29::reflect::Reflect;
 use moteus::Mode;
 use serde::{Deserialize, Serialize};

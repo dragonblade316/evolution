@@ -1,10 +1,10 @@
 use common::{GamePadState, MotorCMD};
+use cu29::prelude::*;
 use cu29::{
     CuResult,
     config::ComponentConfig,
     cutask::{CuMsg, CuTask, Freezable},
     input_msg, output_msg,
-    prelude::Reflect,
     units::si::{
         angle::radian,
         angular_velocity::revolution_per_minute,

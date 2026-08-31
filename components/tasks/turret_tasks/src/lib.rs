@@ -1,4 +1,5 @@
 use cu29::cutask::{CuMsg, CuTask, Freezable};
+use cu29::prelude::*;
 use cu29::reflect::Reflect;
 use cu29::units::si::angle::degree;
 use cu29::units::si::{
@@ -13,7 +14,7 @@ type TurretAngle = Angle;
 type TargetAngle = Angle;
 
 #[derive(Reflect)]
-struct TurretAngleSolver {
+pub struct TurretAngleSolver {
     min: Angle,
     max: Angle,
 }
@@ -97,7 +98,8 @@ impl CuTask for TurretAngleSolver {
 }
 
 
-struct TurretCheck {
+#[derive(Reflect)]
+pub struct TurretCheck {
     angle_tol: Angle,
     velocity_tol: AngularVelocity,
 }

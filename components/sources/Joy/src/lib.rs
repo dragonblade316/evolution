@@ -1,6 +1,7 @@
 use common::GamePadState;
 use cu29::prelude::*;
 use gilrs::{Axis, Button, Gamepad, Gilrs, GamepadId};
+use std::sync::Mutex;
 
 // ---------------------------------------------------------------------------
 // JoySource — copper-rs source that reads joystick input
@@ -16,9 +17,12 @@ use gilrs::{Axis, Button, Gamepad, Gilrs, GamepadId};
 /// Config keys:
 ///   deadband — stick axis deadzone in [0, 1) (default: 0.08)
 #[derive(Reflect)]
+#[reflect(from_reflect = false, no_field_bounds)]
 pub struct JoySource {
-    gilrs: Gilrs,
+    #[reflect(ignore)]
+    gilrs: Mutex<Gilrs>,
     /// The id of the Xbox gamepad we are tracking.
+    #[reflect(ignore)]
     active_id: Option<GamepadId>,
     /// Axis magnitude below this is treated as zero; remaining range is rescaled.
     deadband: f32,
@@ -70,16 +74,20 @@ impl CuSrcTask for JoySource {
         .clamp(0.0, 0.95);
 
         Ok(Self {
-            gilrs,
+            gilrs: Mutex::new(gilrs),
             active_id,
             deadband,
         })
     }
 
     fn start(&mut self, _ctx: &CuContext) -> CuResult<()> {
+        let gilrs = self
+            .gilrs
+            .lock()
+            .map_err(|_| CuError::from("JoySource: gilrs mutex poisoned"))?;
         // Re-detect gamepad in case one was connected after construction.
         if self.active_id.is_none() {
-            self.active_id = find_xbox_gamepad(&self.gilrs);
+            self.active_id = find_xbox_gamepad(&gilrs);
         }
         Ok(())
     }
@@ -89,10 +97,14 @@ impl CuSrcTask for JoySource {
     }
 
     fn process(&mut self, _ctx: &CuContext, output: &mut Self::Output<'_>) -> CuResult<()> {
+        let mut gilrs = self
+            .gilrs
+            .lock()
+            .map_err(|_| CuError::from("JoySource: gilrs mutex poisoned"))?;
         // --- drain and apply all pending events ---
-        while let Some(event) = self.gilrs.next_event() {
+        while let Some(event) = gilrs.next_event() {
             if self.active_id.is_none() {
-                let gp = self.gilrs.gamepad(event.id);
+                let gp = gilrs.gamepad(event.id);
                 if is_xbox_gamepad(&gp) {
                     self.active_id = Some(event.id);
                 }
@@ -100,19 +112,19 @@ impl CuSrcTask for JoySource {
             if Some(event.id) != self.active_id {
                 continue;
             }
-            self.gilrs.update(&event);
+            gilrs.update(&event);
         }
 
         // If the active pad dropped, try to reacquire an Xbox controller.
         if self.active_id.is_none() {
-            self.active_id = find_xbox_gamepad(&self.gilrs);
+            self.active_id = find_xbox_gamepad(&gilrs);
         }
 
         let mut state = GamePadState::default();
 
         if let Some(id) = self.active_id {
-            if self.gilrs.gamepad(id).is_connected() {
-                let gp = self.gilrs.gamepad(id);
+            if gilrs.gamepad(id).is_connected() {
+                let gp = gilrs.gamepad(id);
 
                 // axes (deadbanded + rescaled so full throw still reaches ±1)
                 let db = self.deadband;

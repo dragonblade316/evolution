@@ -21,6 +21,7 @@ use crate::project::{ProjectInfo, SourcePackage};
 pub struct ComponentCatalog {
     pub components: Vec<ComponentDescriptor>,
     pub diagnostics: Vec<String>,
+    type_aliases: HashMap<String, String>,
 }
 
 impl ComponentCatalog {
@@ -30,6 +31,19 @@ impl ComponentCatalog {
                 || component.type_path.ends_with(type_path)
                 || type_path.ends_with(&component.type_path)
         })
+    }
+
+    pub fn canonical_type(&self, type_path: &str) -> String {
+        let normalized = normalize_type(type_path);
+        let alias = self.type_aliases.get(&normalized).or_else(|| {
+            normalized
+                .rsplit("::")
+                .next()
+                .and_then(|name| self.type_aliases.get(name))
+        });
+        alias
+            .cloned()
+            .unwrap_or(normalized)
     }
 
     pub fn index(project: &ProjectInfo) -> Self {
@@ -394,9 +408,23 @@ impl Collector {
                 .then_with(|| left.type_path.cmp(&right.type_path))
         });
         components.dedup_by(|left, right| left.type_path == right.type_path);
+        let mut type_aliases = self
+            .aliases
+            .keys()
+            .map(|alias| (normalize_type(alias), self.resolve_alias(alias, 0)))
+            .collect::<HashMap<_, _>>();
+        for (name, aliases) in &self.simple_aliases {
+            if aliases.len() == 1 {
+                type_aliases.insert(
+                    normalize_type(name),
+                    self.resolve_alias(&aliases[0], 0),
+                );
+            }
+        }
         ComponentCatalog {
             components,
             diagnostics: self.diagnostics,
+            type_aliases,
         }
     }
 
@@ -656,7 +684,8 @@ fn qualify_type(
         .find(|part| !part.is_empty())
         .unwrap_or(compact);
     if let Some(imported) = imports.get(first) {
-        return compact.replacen(first, imported, 1);
+        let imported = qualify_imported_path(imported, is_app, crate_name);
+        return compact.replacen(first, &imported, 1);
     }
     if compact.starts_with("crate::") {
         return if is_app {
@@ -669,6 +698,18 @@ fn qualify_type(
         return compact.to_string();
     }
     qualify_item(is_app, crate_name, module, compact)
+}
+
+fn qualify_imported_path(path: &str, is_app: bool, crate_name: &str) -> String {
+    if let Some(rest) = path.strip_prefix("crate::") {
+        if is_app {
+            rest.to_string()
+        } else {
+            format!("{crate_name}::{rest}")
+        }
+    } else {
+        path.to_string()
+    }
 }
 
 fn qualify_item(is_app: bool, crate_name: &str, module: &str, item: &str) -> String {
@@ -901,6 +942,22 @@ mod tests {
     }
 
     #[test]
+    fn qualifies_imported_dependency_crate_paths() {
+        let imports = HashMap::from([(
+            "Payload".to_string(),
+            "crate::cu29::payloads::Payload".to_string(),
+        )]);
+        assert_eq!(
+            qualify_type("Payload", false, "evods", "cu29::tasks", &imports),
+            "evods::cu29::payloads::Payload"
+        );
+        assert_eq!(
+            qualify_type("Payload", true, "app", "tasks", &imports),
+            "cu29::payloads::Payload"
+        );
+    }
+
+    #[test]
     fn indexes_tasks_aliases_bridges_monitors_and_config_hints() {
         let temp = tempfile::tempdir().unwrap();
         let source_root = temp.path().join("src");
@@ -969,10 +1026,15 @@ mod tests {
         assert_eq!(source.kind, ComponentKind::Source);
         assert_eq!(source.outputs[0].canonical_type, sink.inputs[0].canonical_type);
         assert_eq!(source.config_hints[0].key, "rate");
+        assert_eq!(catalog.canonical_type("fixture::TaggedPayload"), "Payload");
         let bridge = catalog.find("ConcreteBridge").unwrap();
         assert_eq!(bridge.channels.len(), 2);
         assert_eq!(bridge.inputs.len(), 1);
         assert_eq!(bridge.outputs.len(), 1);
+        assert_eq!(bridge.channels[0].id, "command");
+        assert_eq!(bridge.channels[0].direction, PortDirection::Input);
+        assert_eq!(bridge.channels[1].id, "state");
+        assert_eq!(bridge.channels[1].direction, PortDirection::Output);
         assert_eq!(catalog.find("Monitor").unwrap().kind, ComponentKind::Monitor);
         assert_eq!(catalog.find("Reexported").unwrap().type_path, "Reexported");
     }

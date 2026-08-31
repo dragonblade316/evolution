@@ -2,7 +2,7 @@
 name = "masterpiece"
 version = "0.1.0"
 edition = "2021"
-default-run = "masterpiece"
+default-run = "masterpiece-sim"
 
 # The main executable of your application
 [[bin]]
@@ -12,6 +12,7 @@ path = "src/main.rs"
 [[bin]]
 name = "masterpiece-sim"
 path = "src/sim.rs"
+required-features = ["sim-debug"]
 
 [[bin]]
 name = "masterpiece-logreader"
@@ -29,7 +30,7 @@ logreader = ["dep:cu29-export"]
 sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug"]
 
 [dependencies]
-cu29 = { workspace = true }
+cu29 = { workspace = true, features = ["reflect"] }
 cu29-export = { workspace = true, optional = true }
 serde = { workspace = true }
 rapier2d = { workspace = true }
@@ -40,13 +41,22 @@ bincode.workspace = true
 
 moteus_bridge = { workspace = true }
 Joy = { workspace = true }
-# oakd_lite_source = { workspace = true }
-accel_limiter = { workspace = true }
+oakd_lite_source = { workspace = true }
+BNOSource = { workspace = true }
+Prototyping = { workspace = true }
+drive_utils = { workspace = true }
 diffdrive = { workspace = true }
 field_oriented_diff_drive = { workspace = true }
 iekflocalizer = { workspace = true }
 moteus_tasks = { workspace = true }
+allience_spesific_tasks = { workspace = true }
+sotm_rt = { workspace = true }
+turret_tasks = { workspace = true }
+evoviz = { workspace = true }
+rpsinks = { workspace = true }
 cu-apriltag = { workspace = true }
 cu-logmon = { workspace = true }
 evosim = { workspace = true }
+evods = { workspace = true }
 rerun = { workspace = true }
+cu-zenoh-bridge = { workspace = true }

@@ -47,15 +47,15 @@ fn main() {
     )));
 
     let indexer = Rc::new(RefCell::new(Motor::new()));
-    let turret_angle = Rc::new(RefCell::new(0.0f32));
+    let turret_angle = Rc::new(RefCell::new(Motor::new()));
     let shooter = Rc::new(RefCell::new(Motor::new()));
 
     let (robot_clock, robot_clock_mock) = RobotClock::mock();
 
     let sim_diff_drive = diff_drive.clone();
-    let _sim_indexer = indexer.clone();
-    let _sim_turret_angle = turret_angle.clone();
-    let _sim_shooter = shooter.clone();
+    let sim_indexer = indexer.clone();
+    let sim_turret_angle = turret_angle.clone();
+    let sim_shooter = shooter.clone();
     let sim_rec = rec.clone();
     let mut sim_callback = move |step: default::SimStep<'_>| -> SimOverride {
         // println!("callback called");
@@ -72,7 +72,8 @@ fn main() {
                         );
                         sim_diff_drive.borrow_mut().set_left_motor(v.clone())
                     }
-                    _ => error!("Non velocity cmd not supported by sim")
+                    MotorCMD::Stop => {}
+                    _ => error!("Non velocity cmd not supported by sim. Data: {:?}", data)
                 }
                 SimOverride::ExecutedBySim
             }
@@ -88,7 +89,8 @@ fn main() {
                         );
                         sim_diff_drive.borrow_mut().set_right_motor(v.clone())
                     }
-                    _ => error!("Non velocity cmd not supported by sim")
+                    MotorCMD::Stop => {}
+                    _ => error!("Non velocity cmd not supported by sim. Data: {:?}", data)
                 }
 
                 SimOverride::ExecutedBySim
@@ -108,13 +110,84 @@ fn main() {
             default::SimStep::MoteusRxDriveRightData { channel, msg } => {
                 let diff_data= sim_diff_drive.borrow().noisy_state();
                 let payload = MoteusData {
-                    canid: 1,
+                    canid: 2,
                     data: MotorData { pos: diff_data.right_pos, vel: diff_data.right_speed, accel: None, torque: None },
                     temp: 32.2,
                     voltage: 22.2,
                     fault: 0,
                 };
                 msg.set_payload(payload);
+                SimOverride::ExecutedBySim
+            }
+            default::SimStep::MoteusTxIndexer { channel, msg, output } => {
+                let data = msg.payload().unwrap();
+                match data {
+                    MotorCMD::Velocity(v, t) => {
+                        let vel = v.get::<radian_per_second>();
+                        debug!("vcmd right: {vel}");
+                        let _ = sim_rec.log(
+                            "motors/indexer",
+                            &Scalars::single(vel)
+                        );
+                        sim_indexer.borrow_mut().set_vel_target(v.clone(), AngularAcceleration::new::<radian_per_second_squared>(5.0))
+                    }
+                    MotorCMD::Stop => {}
+                    _ => error!("Non velocity cmd not supported by sim. Data: {:?}", data)
+                }
+                SimOverride::ExecutedBySim
+            }
+            default::SimStep::MoteusRxTurretData { channel, msg } => {
+                SimOverride::ExecutedBySim
+            }
+            default::SimStep::MoteusTxTurret { channel, msg, output } => {
+                let data = msg.payload().unwrap();
+                match data {
+                    MotorCMD::Position(p, v, t) => {
+                        let pos = p.get::<radian>();
+                        debug!("vcmd right: {pos}");
+                        let _ = sim_rec.log(
+                            "motors/turret",
+                            &Scalars::single(pos)
+                        );
+                        sim_turret_angle.borrow_mut().set_pos_target(p.clone(), AngularVelocity::new::<radian_per_second>(5.0))
+                    }
+                    MotorCMD::Stop => {}
+                    _ => error!("Non velocity cmd not supported by sim. Data: {:?}", data)
+                }
+                SimOverride::ExecutedBySim
+            }
+            default::SimStep::MoteusRxShooterData { channel, msg } => {
+                SimOverride::ExecutedBySim
+            }
+            default::SimStep::MoteusTxShooter { channel, msg, output } => {
+                let data = msg.payload().unwrap();
+                match data {
+                    MotorCMD::Velocity(v, t) => {
+                        let vel = v.get::<radian_per_second>();
+                        debug!("vcmd right: {vel}");
+                        let _ = sim_rec.log(
+                            "motors/flywheel",
+                            &Scalars::single(vel)
+                        );
+                        sim_shooter.borrow_mut().set_vel_target(v.clone(), AngularAcceleration::new::<radian_per_second_squared>(5.0))
+                    }
+                    MotorCMD::Stop => {}
+                    _ => error!("Non velocity cmd not supported by sim. Data: {:?}", data)
+                }
+                SimOverride::ExecutedBySim
+            }
+            default::SimStep::BinaryServo(CuTaskCallbackState::Process(input, _output)) => {
+                if let Some(deployed) = input.payload() {
+                    let _ = sim_rec.log(
+                        "actuators/binary_servo",
+                        &rerun::AnyValues::default().with_component_from_data(
+                            "deployed",
+                            std::sync::Arc::new(
+                                rerun::external::arrow::array::BooleanArray::from(vec![*deployed]),
+                            ),
+                        ),
+                    );
+                }
                 SimOverride::ExecutedBySim
             }
             _ => SimOverride::ExecuteByRuntime,
@@ -158,13 +231,13 @@ fn main() {
         .ok();
         rec.log(
             "robot/body",
-            &rerun::Boxes3D::from_half_sizes([[0.20, 0.15, 0.05]]),
+            &rerun::Boxes3D::from_half_sizes([[0.15, 0.20, 0.05]]),
         )
         .ok();
-        // +X is forward in the robot frame (theta = 0 drives along world +X).
+        // +Y is forward in the robot frame (theta = 0 drives along world +Y).
         rec.log(
             "robot/front",
-            &rerun::Arrows3D::from_vectors([[0.30, 0.0, 0.0]])
+            &rerun::Arrows3D::from_vectors([[0.0, 0.30, 0.0]])
                 .with_origins([[0.0, 0.0, 0.08]])
                 .with_radii([0.02])
                 .with_colors([rerun::Color::from_rgb(255, 80, 80)])
@@ -172,7 +245,7 @@ fn main() {
         )
         .ok();
         {
-            let angle = *turret_angle.borrow();
+            let angle = turret_angle.borrow().pos().get::<radian>();
             let speed = shooter.borrow().speed().get::<radian_per_second>();
             let scale = 0.01;
             let len = speed.abs() * scale + 0.08;
@@ -205,7 +278,7 @@ fn main() {
         .ok();
         rec.log(
             "motors/turret/angle",
-            &Scalars::single(*turret_angle.borrow()),
+            &Scalars::single(turret_angle.borrow().pos().get::<radian>()),
         )
         .ok();
         rec.log(

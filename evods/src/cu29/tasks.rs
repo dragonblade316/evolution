@@ -4,7 +4,7 @@ use cu29::{
 };
 use common::{DSStatus, GamePadState};
 
-use crate::cu29::payloads::{DsTxMsg, DxRxMsg};
+use crate::cu29::payloads::DsTxMsg;
 
 #[derive(Reflect)]
 pub struct DsRx {
@@ -41,9 +41,7 @@ impl CuTask for DsRx {
                     return Err(CuError::new(199)
                         .add_cause("DsTxMsg received out of order; leaving the last command active"));
                 }
-                if !input.metadata.process_time.end.is_none() {
-                    self.last_message_timestamp = input.metadata.process_time.end.unwrap();
-                }
+                self.last_message_timestamp = ctx.now();
                 self.last = cmd.clone();
                 self.seq = cmd.seq;
                 cmd.clone()
@@ -53,10 +51,12 @@ impl CuTask for DsRx {
 
             if ctx.now() - self.last_message_timestamp > CuDuration::from_millis(500) {
                 output.0.set_payload(DSStatus::DISCONNECTED);
+                output.1.set_payload(GamePadState::default());
                 return Ok(())
             }
             if cmd.estop {
                 output.0.set_payload(DSStatus::ESTOPPED);
+                output.1.set_payload(GamePadState::default());
                 return Ok(())
             }
 
@@ -66,46 +66,12 @@ impl CuTask for DsRx {
             };
 
             output.0.set_payload(status);
-            output.1.set_payload(cmd.gamepad.clone());
+            output.1.set_payload(if cmd.enabled {
+                cmd.gamepad.clone()
+            } else {
+                GamePadState::default()
+            });
 
             Ok(())
-    }
-}
-
-/// Acknowledges a driver-station command on the robot-to-driver-station
-/// channel. The echoed sequence number lets the driver station detect loss and
-/// measure round-trip time.
-#[derive(Reflect)]
-pub struct DsTx;
-
-impl Freezable for DsTx {}
-
-impl CuTask for DsTx {
-    type Input<'m> = input_msg!(DsTxMsg);
-    type Output<'m> = output_msg!(DxRxMsg);
-    type Resources<'r> = ();
-
-    fn new(
-        _config: Option<&ComponentConfig>,
-        _resources: Self::Resources<'_>,
-    ) -> CuResult<Self>
-    where
-        Self: Sized,
-    {
-        Ok(Self)
-    }
-
-    fn process(
-        &mut self,
-        _ctx: &CuContext,
-        input: &Self::Input<'_>,
-        output: &mut Self::Output<'_>,
-    ) -> CuResult<()> {
-        match input.payload() {
-            Some(command) => output.set_payload(DxRxMsg { seq: command.seq }),
-            None => output.clear_payload(),
-        }
-
-        Ok(())
     }
 }

@@ -10,8 +10,10 @@ const DEFAULT_LENGTH_M: f32 = 0.5;
 const DEFAULT_WIDTH_M: f32 = 0.5;
 const DEFAULT_HEIGHT_M: f32 = 0.2;
 
-#[derive(Reflect)]
+#[derive(Reflect, Clone)]
+#[reflect(opaque, from_reflect = false, no_field_bounds)]
 pub struct RobotVisualizer {
+    #[reflect(ignore)]
     rec: RecordingStream,
     length: Length,
     width: Length,
@@ -95,7 +97,8 @@ const DEFAULT_TURRET_X_M: f32 = 0.0;
 const DEFAULT_TURRET_Y_M: f32 = 0.0;
 const DEFAULT_TURRET_Z_M: f32 = 0.0;
 
-#[derive(Reflect)]
+#[derive(Reflect, Clone)]
+#[reflect(opaque, from_reflect = false, no_field_bounds)]
 pub struct TurretVisualizer {
     rec: RecordingStream,
     parent: Option<String>,

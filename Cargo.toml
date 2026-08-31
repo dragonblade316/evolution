@@ -4,7 +4,7 @@ members = [
     "apps/masterpiece",
     "apps/proto",
     "components/bridges/moteus_bridge", "components/tasks/diffdrive",
-    "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/accel_limiter",
+    "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/drive_utils",
     "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "components/sources/Joy", "components/tasks/Prototyping", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods", "components/sources/BNOSource", "external/evograph", "components/tasks/allience_spesific_tasks", "components/tasks/apriltag_tasks"]
 resolver = "2"
 
@@ -12,12 +12,14 @@ resolver = "2"
 opt-level = 1
 
 [workspace.dependencies]
+# cu29 = { version = "1.1.0", features = ["reflect"] }
 cu29 = "1.1.0"
 cu-spatial-payloads = "1.1.0"
 cu-sensor-payloads = "1.1.0"
 cu-apriltag = "1.1.0"
-cu-logmon = "1.0.1"
+cu-logmon = "1.1.0"
 cu29-export = { version = "*"  }
+cu-zenoh-bridge = "1.1.0"
 serde = { version = "*", features = ["derive"] }
 nalgebra = "0.34.2"
 rerun = "0.33.1"
@@ -41,11 +43,18 @@ common = { path = "./components/payloads/common/" }
 
 moteus_bridge = { path = "./components/bridges/moteus_bridge/" }
 oakd_lite_source = { path = "./components/sources/oakd_lite_source/" }
-accel_limiter = { path = "./components/tasks/accel_limiter/" }
+BNOSource = { path = "./components/sources/BNOSource/" }
+drive_utils = { path = "./components/tasks/drive_utils/" }
 diffdrive = { path = "./components/tasks/diffdrive/" }
 field_oriented_diff_drive = { path = "./components/tasks/field_oriented_diff_drive/" }
 iekflocalizer = { path = "./components/tasks/iekflocalizer/" }
 moteus_tasks = { path = "./components/tasks/moteus_tasks/" }
+allience_spesific_tasks = { path = "./components/tasks/allience_spesific_tasks/" }
+sotm_rt = { path = "./components/tasks/sotm_rt/" }
+turret_tasks = { path = "./components/tasks/turret_tasks/" }
+evoviz = { path = "./components/sinks/evoviz/" }
+rpsinks = { path = "./components/sinks/rpsinks/" }
 evosim = { path = "./external/evosim/" }
+evods = { path = "./evods/" }
 Joy = { path = "./components/sources/Joy/" }
 Prototyping = { path = "./components/tasks/Prototyping/" }

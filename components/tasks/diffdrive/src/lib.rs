@@ -1,8 +1,9 @@
 use core::f64;
 
 use common::{ChassisSpeeds, DiffDriveSpeeds, GamePadState, MotorCMD};
+use cu29::prelude::*;
 use cu29::{
-    CuResult, config::ComponentConfig, cutask::{CuMsg, CuTask, Freezable}, input_msg, output_msg, prelude::Reflect, units::si::{
+    CuResult, config::ComponentConfig, cutask::{CuMsg, CuTask, Freezable}, input_msg, output_msg, units::si::{
         angular_velocity::radian_per_second,
         f32::{AngularVelocity, Length, Velocity},
         length::meter, velocity::meter_per_second,
@@ -72,10 +73,10 @@ impl CuTask for DiffDriveKinematics {
         };
 
         let left = Velocity::new::<meter_per_second>(
-            cmd.x.raw() - (cmd.theta.raw() * self.trackwidth.raw()) / 2.0,
+            cmd.y.raw() - (cmd.theta.raw() * self.trackwidth.raw()) / 2.0,
         );
         let right = Velocity::new::<meter_per_second>(
-            cmd.x.raw() + (cmd.theta.raw() * self.trackwidth.raw()) / 2.0,
+            cmd.y.raw() + (cmd.theta.raw() * self.trackwidth.raw()) / 2.0,
         );
 
         output.set_payload(DiffDriveSpeeds { left, right });

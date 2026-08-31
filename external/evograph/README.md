@@ -29,17 +29,15 @@ position-only sidecars remain readable and are upgraded when next saved.
   dependencies. Rust sources are parsed with `syn` to find Copper task, bridge, and monitor trait
   implementations, port types, concrete bridge aliases, channel declarations, and likely config
   keys.
-- Type aliases are canonicalized for connection checks. A graph cannot be saved with type
-  mismatches, duplicate producers, cycles, invalid RON values, or invalid constant syntax.
-  Unconnected inputs are warnings and do not block saving.
+- Port types are displayed for reference but do not restrict connections. Diagnostics are advisory
+  and do not block saving.
 - Choosing a component from a workspace-only dependency stages that package for insertion into
   the application manifest as an inherited workspace dependency on save.
 - Unsupported top-level RON sections and unknown fields are preserved. Unchanged sections are
   kept byte-for-byte, including comments. Atomic writes and an external-change check make it safe
   to keep Evograph open alongside a text editor.
-- Source and manifest changes trigger a debounced reindex. When the graph is clean, its config is
-  reloaded against the new type catalog. Dirty nodes retain their current ports so unsaved work is
-  not silently rewritten.
+- Source and manifest changes prompt for a manual reindex so Cargo metadata and source scanning do
+  not block the UI while editing. Dirty nodes retain their current ports when reindexed.
 
 Config-key discovery is intentionally advisory: detected keys are optional shortcuts, and users
 can always add arbitrary keys. The transform wizard generates a const-valid Copper 1.1

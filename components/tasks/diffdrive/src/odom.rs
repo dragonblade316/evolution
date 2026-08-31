@@ -96,9 +96,9 @@ impl CuTask for DiffDriveOdometry {
 
         // Translate to the robot's control point (center).
         // When turning, a point offset from the axle experiences a
-        // sideways velocity component: v_y = ω · axle_offset.
-        let x = Velocity::new::<meter_per_second>(v_axle);
-        let y = Velocity::new::<meter_per_second>(omega * self.axle_offset.raw());
+        // sideways velocity component: v_x = -ω · axle_offset.
+        let x = Velocity::new::<meter_per_second>(-omega * self.axle_offset.raw());
+        let y = Velocity::new::<meter_per_second>(v_axle);
         let theta = AngularVelocity::new::<radian_per_second>(omega);
 
         output.set_payload(ChassisSpeeds { x, y, theta });
@@ -127,7 +127,8 @@ impl CuTask for DiffDriveOdometry {
 //   - chassis_var  (f32, default 0.05): measurement variance of chassis-derived omega [(rad/s)^2]
 //   - imu_var      (f32, default 0.001): measurement variance of IMU yaw rate [(rad/s)^2]
 // ---------------------------------------------------------------------------
-#[derive(Reflect)]
+#[derive(Reflect, Clone)]
+#[reflect(opaque, from_reflect = false, no_field_bounds)]
 pub struct DiffDriveOmegaFusion {
     /// 1-state Kalman filter estimating the robot yaw rate (omega), in rad/s.
     /// Generic over <T=f32, N=1, U=0>; system is a `LinearNoInputSystem`.
