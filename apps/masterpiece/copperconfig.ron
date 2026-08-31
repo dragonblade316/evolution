@@ -127,6 +127,9 @@
         (
         id: "evo_ds_bridge",
         type: "bridges::EvoDsBridge",
+        config: {
+            "wire_format": "json",
+        },
         channels: [
             Tx(
             id: "telemetry",

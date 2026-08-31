@@ -46,12 +46,8 @@ fn decode_telemetry(payload: &[u8]) -> serde_json::Result<serde_json::Value> {
     serde_json::from_slice(payload)
 }
 
-fn robot_status_from_last_telemetry(
-    last_telemetry: Option<tokio::time::Instant>,
-) -> RobotStatus {
-    if last_telemetry
-        .is_some_and(|last_seen| last_seen.elapsed() <= Duration::from_millis(500))
-    {
+fn robot_status_from_matching_subscriber(matching: bool) -> RobotStatus {
+    if matching {
         RobotStatus::Connected
     } else {
         RobotStatus::Disconnected
@@ -105,11 +101,9 @@ fn zruntime(
         let session = zenoh::open(zenoh::Config::default()).await.unwrap();
         let telsub = session.declare_subscriber("evods/tel/*").await.unwrap();
         let dspub = session.declare_publisher("evods/ds").await.unwrap();
-        let mut connection_check = tokio::time::interval(Duration::from_millis(100));
-        connection_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let ds_matching = dspub.matching_listener().await.unwrap();
         let mut ds_tx = tokio::time::interval(Duration::from_millis(20));
         ds_tx.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut last_telemetry = None;
 
         loop {
             tokio::select! {
@@ -139,17 +133,23 @@ fn zruntime(
                         Ok(message) => {
                             Arc::make_mut(&mut status.telemetry)
                                 .insert(sample.key_expr().to_string(), message);
-                            last_telemetry = Some(tokio::time::Instant::now());
-                            status.robot = RobotStatus::Connected;
                             status_tx.send_replace(status.clone());
                         }
                         Err(err) => eprintln!("[zruntime] invalid telemetry message: {err}"),
                     }
                 }
-                _ = connection_check.tick() => {
-                    let robot = robot_status_from_last_telemetry(last_telemetry);
-
-                    if status.robot != robot {
+                matching = ds_matching.recv_async() => {
+                    let matching = match matching {
+                        Ok(matching) => matching,
+                        Err(err) => {
+                            eprintln!("[zruntime] driver-station matching listener closed: {err}");
+                            status.robot = RobotStatus::Disconnected;
+                            status_tx.send_replace(status.clone());
+                            break;
+                        }
+                    };
+                    let robot = robot_status_from_matching_subscriber(matching.matching());
+                    if robot != status.robot {
                         status.robot = robot;
                         status_tx.send_replace(status.clone());
                     }

@@ -37,6 +37,8 @@
             # rust-bin.stable.latest.default
             cargo
             rust-analyzer
+            git
+            jujutsu
 
             perf
             protobuf
