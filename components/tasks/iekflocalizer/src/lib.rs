@@ -8,13 +8,16 @@ use cu_spatial_payloads::{Pose, Transform3D};
 use cu29::cutask::{CuMsg, CuTask, Freezable};
 use cu29::reflect::Reflect;
 
+use cu29::units::si::angle::radian;
 use cu29::units::si::angular_velocity::radian_per_second;
 use cu29::units::si::f32::{AngularVelocity, Velocity};
+use cu29::units::si::f64::{Angle as Angle64, Length as Length64};
+use cu29::units::si::length::meter;
 use cu29::units::si::velocity::meter_per_second;
 use cu29::{input_msg, output_msg};
 use sophus::lie::{Isometry2F64, Rotation2};
 use sophus::nalgebra::{Matrix3, Vector2, Vector3};
-
+use sophus::prelude::IsAffineGroup;
 
 #[derive(Clone)]
 struct IEKF {
@@ -148,21 +151,48 @@ impl TimeMachineIEKF {
 }
 
 fn iso_to_pose(iso: &Isometry2F64) -> Pose<f64> {
-    let mat = iso.matrix();
-    let x = mat[(0, 2)];
-    let y = mat[(1, 2)];
+    let translation = iso.translation();
     let theta = iso.rotation().log()[0];
-    let c = theta.cos();
-    let s = theta.sin();
-    Transform3D::from_matrix([
-        [c, -s, 0.0, x],
-        [s,  c, 0.0, y],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    ])
+
+    // Transform3D's default Glam-backed `from_matrix` path interprets the
+    // nested array as columns, which drops a row-major translation. Use the
+    // typed constructor so translation and yaw are stored unambiguously.
+    Transform3D::<f64>::from_translation_euler_xyz(
+        [
+            Length64::new::<meter>(translation[0]),
+            Length64::new::<meter>(translation[1]),
+            Length64::new::<meter>(0.0),
+        ],
+        [
+            Angle64::new::<radian>(0.0),
+            Angle64::new::<radian>(0.0),
+            Angle64::new::<radian>(theta),
+        ],
+    )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn iso_to_pose_preserves_translation_and_yaw() {
+        let iso = Isometry2F64::from_rotation_and_translation(
+            Rotation2::rot(0.75),
+            Vector2::new(1.25, -2.5),
+        );
+
+        let pose = iso_to_pose(&iso);
+        let translation = pose.translation();
+        let rotation = pose.rotation();
+        let yaw = f64::atan2(rotation[1][0], rotation[0][0]);
+
+        assert!((translation[0].get::<meter>() - 1.25).abs() < 1.0e-12);
+        assert!((translation[1].get::<meter>() + 2.5).abs() < 1.0e-12);
+        assert!(translation[2].get::<meter>().abs() < 1.0e-12);
+        assert!((yaw - 0.75).abs() < 1.0e-12);
+    }
+}
 
 #[derive(Reflect, Clone)]
 #[reflect(opaque, from_reflect = false, no_field_bounds)]

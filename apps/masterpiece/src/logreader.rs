@@ -8,5 +8,4 @@ gen_cumsgs!("copperconfig.ron");
 
 #[cfg(feature = "logreader")]
 fn main() {
-    run_cli::<CuStampedDataSet>().expect("Failed to run the export CLI");
-}
+    run_cli::<CuStampedDataSet>().expect("Failed to run the export CLI"); }

@@ -137,6 +137,19 @@ fn main() {
                 SimOverride::ExecutedBySim
             }
             default::SimStep::MoteusRxTurretData { channel, msg } => {
+                let motor = sim_turret_angle.borrow();
+                msg.set_payload(MoteusData {
+                    canid: 3,
+                    data: MotorData {
+                        pos: motor.pos(),
+                        vel: motor.speed(),
+                        accel: None,
+                        torque: None,
+                    },
+                    temp: 32.2,
+                    voltage: 22.2,
+                    fault: 0,
+                });
                 SimOverride::ExecutedBySim
             }
             default::SimStep::MoteusTxTurret { channel, msg, output } => {
@@ -157,6 +170,19 @@ fn main() {
                 SimOverride::ExecutedBySim
             }
             default::SimStep::MoteusRxShooterData { channel, msg } => {
+                let motor = sim_shooter.borrow();
+                msg.set_payload(MoteusData {
+                    canid: 4,
+                    data: MotorData {
+                        pos: motor.pos(),
+                        vel: motor.speed(),
+                        accel: None,
+                        torque: None,
+                    },
+                    temp: 32.2,
+                    voltage: 22.2,
+                    fault: 0,
+                });
                 SimOverride::ExecutedBySim
             }
             default::SimStep::MoteusTxShooter { channel, msg, output } => {

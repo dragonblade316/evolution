@@ -1,0 +1,38 @@
+# Top-level entries in each CopperList `msgs` array are addressed by slot index.
+# Multi-output entries use `slot.output`, such as `13.0`.
+
+[viewer]
+# These scalar entity paths are plotted on startup. Every exported value is still
+# recorded and can be added manually from Rerun's blueprint panel.
+time_series = [
+    "copper/outputs/chassis_command/payload/x",
+    "copper/outputs/chassis_command/payload/y",
+    "copper/outputs/chassis_command/payload/theta",
+    "copper/outputs/drive_command/payload/left",
+    "copper/outputs/drive_command/payload/right",
+    "copper/outputs/left_drive_feedback/payload/data/pos",
+    "copper/outputs/left_drive_feedback/payload/data/vel",
+    "copper/outputs/right_drive_feedback/payload/data/pos",
+    "copper/outputs/right_drive_feedback/payload/data/vel",
+]
+
+[outputs."3"]
+name = "chassis_command"
+
+[outputs."4"]
+name = "drive_command"
+
+[outputs."8"]
+name = "alliance_transform"
+kind = "point"
+
+[outputs."9"]
+name = "left_drive_feedback"
+
+[outputs."10"]
+name = "right_drive_feedback"
+
+[outputs."13.0"]
+name = "robot_pose"
+kind = "pose"
+dimensions = [0.5, 0.5, 0.2]

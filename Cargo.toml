@@ -13,13 +13,13 @@ opt-level = 1
 
 [workspace.dependencies]
 # cu29 = { version = "1.1.0", features = ["reflect"] }
-cu29 = "1.1.0"
-cu-spatial-payloads = "1.1.0"
-cu-sensor-payloads = "1.1.0"
-cu-apriltag = "1.1.0"
-cu-logmon = "1.1.0"
-cu29-export = { version = "*"  }
-cu-zenoh-bridge = "1.1.0"
+cu29 = "1.1.1"
+cu-spatial-payloads = "1.1.1"
+cu-sensor-payloads = "1.1.1"
+cu-apriltag = "1.1.1"
+cu-logmon = "1.1.1"
+cu29-export = { version = "*", features = ["mcap"] }
+cu-zenoh-bridge = "1.1.1"
 serde = { version = "*", features = ["derive"] }
 nalgebra = "0.34.2"
 rerun = "0.33.1"

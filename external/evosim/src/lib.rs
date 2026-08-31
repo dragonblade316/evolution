@@ -34,11 +34,13 @@ impl Motor {
 
 
     pub fn set_pos_target(&mut self, pos: Angle, vel: AngularVelocity) {
-           self.target_pos = pos;
-           self.current_speed = vel;
+        self.pos_ctl = true;
+        self.target_pos = pos;
+        self.current_speed = vel;
     }
 
     pub fn set_vel_target(&mut self, speed: AngularVelocity, accel: AngularAcceleration) {
+        self.pos_ctl = false;
         self.target_speed = speed;
         self.acceleration = accel;
     }
@@ -56,12 +58,18 @@ impl Motor {
     pub fn update(&mut self, dt: f32) {
         if self.pos_ctl {
             let diff = self.target_pos.get::<radian>() - self.current_pos.get::<radian>();
-            let max_step = self.current_speed.get::<radian_per_second>() * dt;
+            let max_speed = self.current_speed.get::<radian_per_second>().abs();
+            let max_step = max_speed * dt;
             if diff.abs() <= max_step {
                 self.current_pos = self.target_pos;
+                self.current_speed = AngularVelocity::new::<radian_per_second>(0.0);
             } else {
+                self.current_speed = AngularVelocity::new::<radian_per_second>(
+                    max_speed * diff.signum(),
+                );
                 self.current_pos = Angle::new::<radian>(
-                    self.current_pos.get::<radian>() + max_step * diff.signum(),
+                    self.current_pos.get::<radian>()
+                        + self.current_speed.get::<radian_per_second>() * dt,
                 );
             }
         } else {
@@ -205,5 +213,49 @@ impl DiffDrive {
         self.theta = Angle::new::<radian>(theta_rad + omega * dt);
         self.x = Length::new::<meter>(self.x.get::<meter>() + v_x * dt);
         self.y = Length::new::<meter>(self.y.get::<meter>() + v_y * dt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn position_target_moves_to_target_and_stops() {
+        let mut motor = Motor::new();
+        motor.set_pos_target(
+            Angle::new::<radian>(1.0),
+            AngularVelocity::new::<radian_per_second>(2.0),
+        );
+
+        motor.update(0.25);
+        assert!((motor.pos().get::<radian>() - 0.5).abs() < f32::EPSILON);
+
+        motor.update(0.25);
+        assert!((motor.pos().get::<radian>() - 1.0).abs() < f32::EPSILON);
+        assert!(motor.speed().get::<radian_per_second>().abs() < f32::EPSILON);
+
+        motor.update(0.25);
+        assert!((motor.pos().get::<radian>() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn velocity_target_switches_out_of_position_control() {
+        let mut motor = Motor::new();
+        motor.set_pos_target(
+            Angle::new::<radian>(1.0),
+            AngularVelocity::new::<radian_per_second>(2.0),
+        );
+        motor.update(0.25);
+
+        motor.set_vel_target(
+            AngularVelocity::new::<radian_per_second>(0.0),
+            AngularAcceleration::new::<radian_per_second_squared>(10.0),
+        );
+        motor.update(0.1);
+        motor.update(0.1);
+
+        assert!((motor.pos().get::<radian>() - 0.8).abs() < f32::EPSILON);
+        assert!(motor.speed().get::<radian_per_second>().abs() < f32::EPSILON);
     }
 }

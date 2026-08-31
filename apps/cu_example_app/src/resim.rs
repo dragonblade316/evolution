@@ -38,7 +38,7 @@ fn default_replay_log_base() -> PathBuf {
         .join(format!("{APP_NAME}_resim.copper"))
 }
 
-fn default_callback(_step: default::SimStep<'_>) -> SimOverride {
+fn default_callback(step: default::SimStep<'_>) -> SimOverride {
     SimOverride::ExecuteByRuntime
 }
 

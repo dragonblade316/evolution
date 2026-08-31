@@ -97,6 +97,7 @@
               numpy
               scipy
               plotly
+              rerun-sdk
             ]))
           ];
 

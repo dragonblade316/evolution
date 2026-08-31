@@ -1,5 +1,11 @@
+// Replay harness: drives the raw (app-deprecated) lifecycle API on purpose.
+// Replay needs mid-flight runtime access (keyframe locking, forced
+// timestamps) that the lifecycle typestate deliberately does not expose.
+#![allow(deprecated)]
+
 mod messages;
 mod tasks;
+use masterpiece::bridges;
 
 use cu29::prelude::memmap::{MmapSectionStorage, MmapUnifiedLoggerWrite};
 use cu29::prelude::*;
@@ -9,6 +15,7 @@ use cu29::replay::{
     remove_log_family, serve_remote_debug,
 };
 use cu29_export::{copperlists_reader, keyframes_reader};
+use std::any::{Any, type_name};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
@@ -16,13 +23,14 @@ const PREALLOCATED_STORAGE_SIZE: Option<usize> = Some(1024 * 1024 * 100);
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[copper_runtime(config = "copperconfig.ron", sim_mode = true)]
-struct CuExampleAppReSim {}
+struct MasterpieceAppReSim {}
 
 type ReplayCopperList = CopperList<default::CuStampedDataSet>;
 type ReplayBuildCallback =
     for<'a> fn(
         &'a ReplayCopperList,
         RobotClock,
+        RobotClockMock,
     ) -> Box<dyn for<'z> FnMut(default::SimStep<'z>) -> SimOverride + 'a>;
 type ReplayTimeExtractor = fn(&ReplayCopperList) -> Option<CuTime>;
 
@@ -38,13 +46,24 @@ fn default_replay_log_base() -> PathBuf {
         .join(format!("{APP_NAME}_resim.copper"))
 }
 
-fn default_callback(_step: default::SimStep<'_>) -> SimOverride {
-    SimOverride::ExecuteByRuntime
+fn default_callback(step: default::SimStep<'_>) -> SimOverride {
+    match step {
+        //motors
+        default::SimStep::MoteusRxDriveLeftData { channel, msg } => SimOverride::ExecutedBySim,
+        default::SimStep::MoteusRxDriveRightData { channel, msg } => SimOverride::ExecutedBySim,
+        default::SimStep::MoteusRxShooterData { channel, msg } => SimOverride::ExecutedBySim,
+        default::SimStep::MoteusRxTurretData { channel, msg } => SimOverride::ExecutedBySim,
+        //ds
+        default::SimStep::EvoDsBridgeRxCommand { channel, msg } => SimOverride::ExecutedBySim,
+        //sensors
+        _ => SimOverride::ExecuteByRuntime
+    }
 }
 
 fn build_callback<'a>(
     copperlist: &'a ReplayCopperList,
-    _clock_for_callbacks: RobotClock,
+    _process_clock: RobotClock,
+    _clock_for_callbacks: RobotClockMock,
 ) -> Box<dyn for<'z> FnMut(default::SimStep<'z>) -> SimOverride + 'a> {
     Box::new(move |step: default::SimStep<'_>| default::recorded_replay_step(step, copperlist))
 }
@@ -53,9 +72,9 @@ fn extract_time(copperlist: &ReplayCopperList) -> Option<CuTime> {
     cu29::simulation::recorded_copperlist_timestamp(copperlist)
 }
 
-fn make_app(log_base: &Path) -> CuResult<(CuExampleAppReSim, RobotClock, RobotClockMock)> {
+fn make_app(log_base: &Path) -> CuResult<(MasterpieceAppReSim, RobotClock, RobotClockMock)> {
     let (clock, clock_mock) = RobotClock::mock();
-    let app = CuExampleAppReSim::builder()
+    let app = MasterpieceAppReSim::builder()
         .with_clock(clock.clone())
         .with_log_path(log_base, PREALLOCATED_STORAGE_SIZE)?
         .with_sim_callback(&mut default_callback)
@@ -109,7 +128,7 @@ fn run_one_shot(log_base: &Path, replay_log_base: &Path) -> CuResult<()> {
             clock_mock.set_value(ts.as_nanos());
         }
 
-        let mut sim_callback = build_callback(&entry, clock.clone());
+        let mut sim_callback = build_callback(&entry, clock.clone(), clock_mock.clone());
         app.run_one_iteration(&mut sim_callback)?;
     }
 
@@ -121,7 +140,7 @@ fn run_one_shot(log_base: &Path, replay_log_base: &Path) -> CuResult<()> {
 fn app_factory(
     params: &SessionOpenParams,
     replay_template: &Path,
-) -> CuResult<(CuExampleAppReSim, RobotClock, RobotClockMock)> {
+) -> CuResult<(MasterpieceAppReSim, RobotClock, RobotClockMock)> {
     let replay_log_base = per_session_replay_log_base(
         replay_template,
         [params.role.as_deref().unwrap_or("session")],
@@ -137,7 +156,7 @@ fn run_remote_debug_server(
 ) -> CuResult<()> {
     let replay_template = replay_log_base.to_path_buf();
     serve_remote_debug::<
-        CuExampleAppReSim,
+        MasterpieceAppReSim,
         default::CuStampedDataSet,
         ReplayBuildCallback,
         ReplayTimeExtractor,
