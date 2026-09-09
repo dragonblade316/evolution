@@ -169,16 +169,20 @@ def matrix4(value: Any) -> list[list[float]] | None:
     return [[float(item) for item in row] for row in value]
 
 
+def transform_parts(matrix: list[list[float]]) -> tuple[list[float], list[list[float]]]:
+    """Extract parts from Copper's column-major Transform3D serialization."""
+    return matrix[3][:3], [column[:3] for column in matrix[:3]]
+
+
 def log_spatial(entity: str, payload: Any, mapping: OutputMapping) -> bool:
     matrix = matrix4(payload)
     if matrix is None:
         return False
-    translation = [matrix[0][3], matrix[1][3], matrix[2][3]]
+    translation, rotation = transform_parts(matrix)
     if mapping.kind == "point":
         rr.log(entity, rr.Points3D([translation]))
         return True
     if mapping.kind == "pose":
-        rotation = [row[:3] for row in matrix[:3]]
         rr.log(entity, rr.Transform3D(translation=translation, mat3x3=rotation))
         length, width, height = mapping.dimensions
         rr.log(

@@ -311,7 +311,7 @@
         msg: "moteus_bridge :: messages :: MoteusData",
     ),
         (
-        src: "moteus/turret_data",
+        src: "moteus/shooter_data",
         dst: "moteus_turret_state_assembler",
         msg: "moteus_bridge :: messages :: MoteusData",
     ),
@@ -321,7 +321,7 @@
         msg: "moteus_bridge :: messages :: MoteusData",
     ),
         (
-        src: "moteus/shooter_data",
+        src: "moteus/turret_data",
         dst: "moteus_turret_state_assembler",
         msg: "moteus_bridge :: messages :: MoteusData",
     ),
@@ -347,13 +347,13 @@
     ),
         (
         src: "turret_c_m_d",
-        dst: "moteus/turret",
-        msg: "crate::tasks::TurretCmd::AngleMotorCmd",
+        dst: "moteus/shooter",
+        msg: "crate::tasks::TurretCmd::FlywheelMotorCmd",
     ),
         (
         src: "turret_c_m_d",
-        dst: "moteus/shooter",
-        msg: "crate::tasks::TurretCmd::FlywheelMotorCmd",
+        dst: "moteus/turret",
+        msg: "crate::tasks::TurretCmd::AngleMotorCmd",
     ),
         (
         src: "moteus_data_splitter",

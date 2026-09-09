@@ -12,12 +12,12 @@ use cu29::units::si::velocity::meter_per_second;
 use cu29::reflect::Reflect;
 use cu_spatial_payloads::{Pose, Transform3D};
 
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_PI_2, PI};
 use eqsolver::nalgebra::DVector;
 use ivp::prelude::*;
 
-/// Turret azimuth measured clockwise/counterclockwise from "straight
-/// ahead" of the robot (0 rad = muzzle points along the robot's +x axis).
+/// Turret azimuth measured counterclockwise from straight ahead of the robot
+/// (0 rad = muzzle points along the robot's local +Y axis).
 /// Carries the same SI radian storage as [`turret_tasks::TurretAngle`] so
 /// downstream consumers (e.g. [`turret_tasks::TurretAngleSolver`]) can wire
 /// straight in.
@@ -93,7 +93,9 @@ impl SOTM {
     ///tof: Estimated time of flight
     fn solve_angle(v: f64, x: f64, tof: f64) -> (f64, f64) {
         let L = v*tof;
-        let theta = f64::atan2(L, x);
+        // Lead opposite the chassis' lateral velocity so the projectile's
+        // resulting field-relative lateral velocity approaches zero.
+        let theta = f64::atan2(-L, x);
         let R = f64::sqrt(L*L + x*x);
         (theta, R)
     }
@@ -106,8 +108,9 @@ impl SOTM {
     ///goal_direction: Angle from turret to goal in world frame (radians).
     ///Returns: (turret_angle, muzzle_velocity)
     fn solve(dist_to_goal: f64, dz: f64, v_parallel: f64, v_perpendicular: f64, heading: f64, goal_direction: f64) -> (f64, f64) {
-        // Angle from the front of the robot to the goal
-        let angle_front_to_goal = goal_direction - heading;
+        // `heading` is the world angle of robot-local +X. Robot-forward and
+        // turret zero are local +Y, which is another 90 degrees CCW.
+        let angle_front_to_goal = goal_direction - heading - FRAC_PI_2;
 
         let qt = [dist_to_goal, dz];
         let [_velocity, tof] = Self::solve_range(qt, v_parallel, 60.0).unwrap();
@@ -229,6 +232,7 @@ impl CuTask for SOTM {
         muzzle_velocity_out
             .set_payload(MuzzleVelocity::new::<meter_per_second>(muzzle_velocity as f32));
 
+        debug!("turret_angle_out: {}", turret_angle);
         Ok(())
     }
 }

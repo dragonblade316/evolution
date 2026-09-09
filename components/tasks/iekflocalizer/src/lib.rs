@@ -241,7 +241,7 @@ impl CuTask for IEKFPoseEstimator {
         output: &mut Self::Output<'_>,
     ) -> cu29::CuResult<()> {
         let now = std::time::Instant::now();
-        debug!("hello world");
+        // debug!("hello world");
 
         if let Some(speeds) = input.0.payload() {
             self.tm.update(speeds.clone(), now);
@@ -269,13 +269,20 @@ impl CuTask for IEKFPoseEstimator {
         };
         output.1.set_payload(field_speeds);
 
-        let mat = self.tm.iekf.pose.matrix();
-        debug!(
-            "IEKF pose: x={:.3}, y={:.3}, theta={:.3}",
-            mat[(0, 2)],
-            mat[(1, 2)],
-            self.tm.iekf.pose.rotation().log()[0],
-        );
+        let pose = self.tm.get_pose();
+        let translation = pose.translation();
+        let rotation = pose.rotation();
+        let yaw = f64::atan2(rotation[1][0], rotation[0][0]);
+
+        // debug!(
+        //     ctx,
+        //     "IEKF pose: x={}, y={}, theta={}",
+        //     translation[0].get::<meter>(),
+        //     translation[1].get::<meter>(),
+        //     yaw,
+        // );
+
+
 
         Ok(())
     }

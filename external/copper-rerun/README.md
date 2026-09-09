@@ -71,6 +71,8 @@ kind = "point"
 ```
 
 Supported mapping kinds are `generic`, `pose`, and `point`.
+Spatial payloads use Copper's column-major `Transform3D` serialization, with
+translation stored in the fourth outer array.
 
 The default blueprint contains a 3D view and a time-series view. Only paths in
 `viewer.time_series` are plotted initially; all other values remain recorded and

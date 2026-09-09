@@ -1,7 +1,7 @@
 import io
 import unittest
 
-from copper_rerun import iter_json_values, load_config, matrix4, tov_nanos
+from copper_rerun import iter_json_values, load_config, matrix4, tov_nanos, transform_parts
 
 
 class CopperRerunTests(unittest.TestCase):
@@ -22,6 +22,17 @@ class CopperRerunTests(unittest.TestCase):
         identity = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
         self.assertEqual(matrix4(identity), [[float(v) for v in row] for row in identity])
         self.assertIsNone(matrix4([[1, 0], [0, 1]]))
+
+    def test_extracts_column_major_transform_parts(self):
+        matrix = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [2.0, 3.0, 4.0, 1.0],
+        ]
+        translation, rotation = transform_parts(matrix)
+        self.assertEqual(translation, [2.0, 3.0, 4.0])
+        self.assertEqual(rotation, [column[:3] for column in matrix[:3]])
 
     def test_loads_selected_time_series(self):
         mappings, time_series = load_config(

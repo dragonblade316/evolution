@@ -191,14 +191,13 @@ impl DiffDrive {
     }
 
     pub fn update(&mut self, dt: f32) {
-        // 1. Capture the start-of-step wheel speeds (forward Euler): these are
-        //    the speeds that were actually in effect over the elapsed dt.
-        let vl = self.left_motor.speed().get::<radian_per_second>() * self.wheel_radius.get::<meter>();
-        let vr = self.right_motor.speed().get::<radian_per_second>() * self.wheel_radius.get::<meter>();
-
-        // 2. Advance motors (ramps speed toward target for the *next* step).
+        // 1. Advance motors to the speeds exposed to the simulated sensors.
         self.left_motor.update(dt);
         self.right_motor.update(dt);
+
+        // 2. Integrate the same wheel speeds reported to odometry and the IEKF.
+        let vl = self.left_motor.speed().get::<radian_per_second>() * self.wheel_radius.get::<meter>();
+        let vr = self.right_motor.speed().get::<radian_per_second>() * self.wheel_radius.get::<meter>();
 
         let v_axle = (vl + vr) / 2.0;
         let omega = (vr - vl) / self.track_width.get::<meter>();

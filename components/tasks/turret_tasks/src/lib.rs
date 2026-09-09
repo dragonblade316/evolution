@@ -56,8 +56,12 @@ impl CuTask for TurretAngleSolver {
         output: &mut Self::Output<'_>,
     ) -> CuResult<()> {
         let (current, target) = *input;
-        let (Some(current_angle), Some(target_angle)) = (current.payload(), target.payload())
-        else {
+        let Some(current_angle) = current.payload() else {
+            warning!("TurretAngleSolver is missing the current turret angle input.");
+            return Ok(());
+        };
+        let Some(target_angle) = target.payload() else {
+            warning!("TurretAngleSolver is missing the target angle input from SOTM.");
             return Ok(());
         };
 

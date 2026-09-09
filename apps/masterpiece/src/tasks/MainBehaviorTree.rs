@@ -43,6 +43,8 @@ impl CuTask for S1Behavior {
             let joy = input.1.payload().unwrap_or(&defaultgp);
             let ready_to_fire = input.2.payload().unwrap_or(&false);
 
+            debug!("ds: {}", ds);
+
             match ds {
 
                 DSStatus::ENABLED(t) => {

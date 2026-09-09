@@ -54,9 +54,15 @@ impl CuTask for TurretCMD {
             input: &Self::Input<'_>,
             output: &mut Self::Output<'_>,
         ) -> cu29::CuResult<()> {
-            let cmd = input.0.payload().unwrap_or(&SuperState::Disabled);
+            let cmd = input.0.payload().unwrap_or_else(|| {
+                warning!("No behavior state input into TurretCMD. Using Disabled.");
+                &SuperState::Disabled
+            });
             let default_turret_state = TurretState::default();
-            let turretd = input.1.payload().unwrap_or(&default_turret_state);
+            let turretd = input.1.payload().unwrap_or_else(|| {
+                warning!("No desired turret state input into turretCMD. Using default.");
+                &default_turret_state
+            });
             match cmd {
                 SuperState::Disabled => {
                     output.0.set_payload(MotorCMD::Stop);

@@ -17,4 +17,4 @@ config:
 
 # TurretVisualizer
 
-General rerun visualizer that draws the turret as a 3D box rotated by the input `Angle`. Spawns a rerun viewer on `new`. When `parent` is set (e.g. `"robot"`), the turret logs at `{parent}/turret` so rerun parents it under the robot's transform — `x`/`y`/`z` then become the turret's offset from the robot center in the robot's local frame. Without `parent`, the turret logs standalone at `turret` and `x`/`y`/`z` are world coordinates.
+General rerun visualizer that draws the turret as a 3D box rotated by the input `Angle`. Zero radians points along local +Y and positive angles rotate counterclockwise. Spawns a rerun viewer on `new`. When `parent` is set (e.g. `"robot"`), the turret logs at `{parent}/turret` so rerun parents it under the robot's transform — `x`/`y`/`z` then become the turret's offset from the robot center in the robot's local frame. Without `parent`, the turret logs standalone at `turret` and `x`/`y`/`z` are world coordinates.

@@ -65,7 +65,7 @@ fn main() {
                 match data {
                     MotorCMD::Velocity(v, t) => {
                         let vel = v.get::<radian_per_second>();
-                        debug!("vcmd left: {vel}");
+                        // debug!("vcmd left: {vel}");
                         let _ = sim_rec.log(
                             "motors/left/vcmd",
                             &Scalars::single(vel)
@@ -82,7 +82,7 @@ fn main() {
                 match data {
                     MotorCMD::Velocity(v, t) => {
                         let vel = v.get::<radian_per_second>();
-                        debug!("vcmd right: {vel}");
+                        // debug!("vcmd right: {vel}");
                         let _ = sim_rec.log(
                             "motors/right/vcmd",
                             &Scalars::single(vel)
@@ -124,7 +124,7 @@ fn main() {
                 match data {
                     MotorCMD::Velocity(v, t) => {
                         let vel = v.get::<radian_per_second>();
-                        debug!("vcmd right: {vel}");
+                        // debug!("vcmd right: {vel}");
                         let _ = sim_rec.log(
                             "motors/indexer",
                             &Scalars::single(vel)
@@ -157,7 +157,7 @@ fn main() {
                 match data {
                     MotorCMD::Position(p, v, t) => {
                         let pos = p.get::<radian>();
-                        debug!("vcmd right: {pos}");
+                        // debug!("vcmd right: {pos}");
                         let _ = sim_rec.log(
                             "motors/turret",
                             &Scalars::single(pos)
@@ -190,7 +190,7 @@ fn main() {
                 match data {
                     MotorCMD::Velocity(v, t) => {
                         let vel = v.get::<radian_per_second>();
-                        debug!("vcmd right: {vel}");
+                        // debug!("vcmd right: {vel}");
                         let _ = sim_rec.log(
                             "motors/flywheel",
                             &Scalars::single(vel)
@@ -241,6 +241,8 @@ fn main() {
         diff_drive.borrow_mut().update(timestep.as_secs_f32());
         indexer.borrow_mut().update(timestep.as_secs_f32());
         shooter.borrow_mut().update(timestep.as_secs_f32());
+        turret_angle.borrow_mut().update(timestep.as_secs_f32());
+
         robot_clock_mock.increment(timestep.into());
         application.run_one_iteration(&mut sim_callback).unwrap();
         let state = diff_drive.borrow().true_state();
@@ -274,9 +276,10 @@ fn main() {
             let angle = turret_angle.borrow().pos().get::<radian>();
             let speed = shooter.borrow().speed().get::<radian_per_second>();
             let scale = 0.01;
-            let len = speed.abs() * scale + 0.08;
-            let dx = len * angle.cos();
-            let dy = len * angle.sin();
+            let len = speed.abs() * scale + 0.35;
+            // Turret zero is robot-forward (+Y); positive angles rotate CCW.
+            let dx = -len * angle.sin();
+            let dy = len * angle.cos();
             rec.log(
                 "robot/turret",
                 &rerun::Arrows3D::from_vectors([[dx, dy, 0.0]])

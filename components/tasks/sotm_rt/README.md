@@ -33,7 +33,7 @@ robot Pose + target Transform3D + ChassisSpeeds
        → solve_range → [muzzle_velocity_initial, tof]
        → solve_angle → (θ_lateral, r)
        → solve_range(r, dz) → [muzzle_velocity_final, _]
-       → turret_angle = (goal_direction − heading) + θ_lateral
+       → turret_angle = (goal_direction − heading − π/2) + θ_lateral
        → return (turret_angle, muzzle_velocity)
   → output: (turret_angle, muzzle_velocity)
 ```
@@ -46,13 +46,14 @@ robot Pose + target Transform3D + ChassisSpeeds
 | `dz` | Vertical difference (goal_z − turret_z) |
 | `v_parallel` | Turret velocity along the toward-goal axis (positive = closing) |
 | `v_perpendicular` | Turret velocity across the goal axis (lateral) |
-| `heading` | Robot yaw in world frame |
+| `heading` | World angle of the robot's local +X axis |
 | `goal_direction` | Angle from turret to goal in world frame |
-| `angle_front_to_goal` | `goal_direction − heading` — base aim angle |
-| `θ_lateral` | Lateral correction from `solve_angle` |
+| `angle_front_to_goal` | `goal_direction − heading − π/2` — base aim angle from robot-forward (+Y) |
+| `θ_lateral` | Correction opposite the robot's lateral velocity |
 | `turret_angle` | `angle_front_to_goal + θ_lateral` — final turret aim |
 | `muzzle_velocity` | Launch velocity from the second `solve_range` pass |
 
 The target transform's translation supplies `[x, y, z]` in the world frame.
 Its rotation is ignored because SOTM aims at the target point rather than an
-orientation-dependent target surface.
+orientation-dependent target surface. Turret angle zero points along the
+robot's local +Y axis, and positive angles rotate counterclockwise.

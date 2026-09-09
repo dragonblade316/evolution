@@ -6,6 +6,6 @@ use cu29_export::run_cli;
 
 gen_cumsgs!("copperconfig.ron");
 
-#[cfg(feature = "logreader")]
+// #[cfg(feature = "logreader")]
 fn main() {
     run_cli::<CuStampedDataSet>().expect("Failed to run the export CLI"); }

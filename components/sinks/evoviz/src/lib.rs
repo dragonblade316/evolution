@@ -5,6 +5,7 @@ use cu29::units::si::f32::{Angle, Length};
 use cu29::units::si::angle::radian;
 use cu_spatial_payloads::Pose;
 use rerun::{RecordingStream, RecordingStreamBuilder};
+use std::f32::consts::FRAC_PI_2;
 
 const DEFAULT_LENGTH_M: f32 = 0.5;
 const DEFAULT_WIDTH_M: f32 = 0.5;
@@ -153,7 +154,9 @@ impl CuSinkTask for TurretVisualizer {
             return Ok(());
         };
 
-        let yaw = angle.get::<radian>();
+        // Boxes are lengthwise along +X. Offset by 90 degrees so turret angle
+        // zero follows the robot convention of forward along local +Y.
+        let yaw = angle.get::<radian>() + FRAC_PI_2;
 
         let turret_path = match &self.parent {
             Some(p) => format!("{p}/turret"),
