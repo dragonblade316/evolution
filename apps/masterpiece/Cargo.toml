@@ -24,9 +24,14 @@ name = "masterpiece-resim"
 path = "src/resim.rs"
 required-features = ["sim-debug"]
 
+[[bin]]
+name = "masterpiece-evoviz-logreader"
+path = "src/evoviz_logreader.rs"
+required-features = ["logreader"]
+
 [features]
 default = []
-logreader = ["dep:cu29-export"]
+logreader = ["dep:cu29-export", "dep:evoviz_test"]
 sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug"]
 
 [dependencies]
@@ -58,5 +63,6 @@ cu-apriltag = { workspace = true }
 cu-logmon = { workspace = true }
 evosim = { workspace = true }
 evods = { workspace = true }
+evoviz_test = { path = "../../external/evoviz_test", optional = true }
 rerun = { workspace = true }
 cu-zenoh-bridge = { workspace = true }
