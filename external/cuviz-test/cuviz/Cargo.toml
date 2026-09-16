@@ -3,4 +3,13 @@ name = "cuviz"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+logstream = ["cu29/logstream", "dep:cu29-logstream"]
+
 [dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+cu29.workspace = true
+cu29-export.workspace = true
+cu29-intern-strs = "1.2.1"
+cu29-logstream = { version = "1.2.1", optional = true }
