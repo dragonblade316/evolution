@@ -104,6 +104,8 @@ impl CuTask for FieldOrientedDiffDrive {
         // traction pushing forward while the robot rotates in place.
         let forward = speed / (1.0 + self.turn_slowdown * theta_cmd.abs());
 
+        // TODO: DiffDriveKinematics consumes forward velocity from `y`, not `x`.
+        // This controller is currently unused, so leave the mismatch until it is adopted.
         output.set_payload(ChassisSpeeds {
             x: Velocity::new::<meter_per_second>(forward),
             y: Velocity::new::<meter_per_second>(0.0),

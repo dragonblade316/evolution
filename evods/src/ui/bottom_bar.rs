@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use common::Allience;
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use tokio::sync::mpsc;
 
@@ -14,6 +15,7 @@ const MUTED: Color32 = Color32::from_rgb(148, 163, 184);
 const GREEN: Color32 = Color32::from_rgb(46, 204, 113);
 const AMBER: Color32 = Color32::from_rgb(245, 158, 11);
 const RED: Color32 = Color32::from_rgb(239, 68, 68);
+const BLUE: Color32 = Color32::from_rgb(59, 130, 246);
 
 struct CommandError {
     message: String,
@@ -126,6 +128,22 @@ impl BottomBar {
                                 .clicked()
                             {
                                 self.send_command(cmd_tx, UiCommand::Disable);
+                            }
+
+                            ui.separator();
+                            let (label, color, next_allience) = match &status.allience {
+                                Allience::RED => ("ALLIANCE: RED", RED, Allience::BLUE),
+                                Allience::BLUE => ("ALLIANCE: BLUE", BLUE, Allience::RED),
+                            };
+                            if ui
+                                .add(
+                                    command_button(label, true, color)
+                                        .min_size(Vec2::new(120.0, 38.0)),
+                                )
+                                .on_hover_text("Change alliance")
+                                .clicked()
+                            {
+                                self.send_command(cmd_tx, UiCommand::SetAllience(next_allience));
                             }
                         },
                     );

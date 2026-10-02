@@ -1,9 +1,8 @@
-mod messages;
-mod tasks;
-
 use common::{MotorCMD, MotorData};
 use cu29::prelude::*;
-use masterpiece::bridges;
+use masterpiece::{
+    MasterpieceSimStep, MasterpieceRuntime, bridges, evo_visualizer,
+};
 use cu29::units::si::angle::radian;
 use cu29::units::si::angular_acceleration::radian_per_second_squared;
 use cu29::units::si::angular_velocity::radian_per_second;
@@ -22,16 +21,14 @@ const PREALLOCATED_STORAGE_SIZE: Option<usize> = Some(1024 * 1024 * 100);
 const TIME_STEP: f32 = 1.0 / 200.0;
 
 
-#[copper_runtime(config = "copperconfig.ron", sim_mode = true)]
-struct MasterpieceApplication {}
-
 fn main() {
     let logger_path = "logs/cu-test.copper";
-    let rec = Rc::new(
-        rerun::RecordingStreamBuilder::new("Uzi sim")
-            .spawn()
-            .expect("failed to spawn rerun"),
-    );
+    let rec = Rc::new(rerun::RecordingStream::disabled());
+    // let rec = Rc::new(
+    //     rerun::RecordingStreamBuilder::new("Uzi sim")
+    //         .spawn()
+    //         .expect("failed to spawn rerun"),
+    // );
 
     if let Some(parent) = Path::new(logger_path).parent() {
         if !parent.exists() {
@@ -57,10 +54,14 @@ fn main() {
     let sim_turret_angle = turret_angle.clone();
     let sim_shooter = shooter.clone();
     let sim_rec = rec.clone();
-    let mut sim_callback = move |step: default::SimStep<'_>| -> SimOverride {
+    let mut visualizer = evo_visualizer().expect("failed to spawn Copper visualizer");
+    let mut sim_callback = move |step: MasterpieceSimStep<'_>| -> SimOverride {
         // println!("callback called");
         match step {
-            default::SimStep::MoteusTxDriveLeft { channel, msg, output } => {
+            MasterpieceSimStep::CopperListCompleted(copperlist) => {
+                visualizer.copperlist_completed(copperlist)
+            }
+            MasterpieceSimStep::MoteusTxDriveLeft { channel, msg, output } => {
                 let data = msg.payload().unwrap();
                 match data {
                     MotorCMD::Velocity(v, t) => {
@@ -77,7 +78,7 @@ fn main() {
                 }
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusTxDriveRight { channel, msg, output } => {
+            MasterpieceSimStep::MoteusTxDriveRight { channel, msg, output } => {
                 let data = msg.payload().unwrap();
                 match data {
                     MotorCMD::Velocity(v, t) => {
@@ -95,7 +96,7 @@ fn main() {
 
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusRxDriveLeftData { channel, msg } => {
+            MasterpieceSimStep::MoteusRxDriveLeftData { channel, msg } => {
                 let diff_data= sim_diff_drive.borrow().noisy_state();
                 let payload = MoteusData {
                     canid: 1,
@@ -107,7 +108,7 @@ fn main() {
                 msg.set_payload(payload);
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusRxDriveRightData { channel, msg } => {
+            MasterpieceSimStep::MoteusRxDriveRightData { channel, msg } => {
                 let diff_data= sim_diff_drive.borrow().noisy_state();
                 let payload = MoteusData {
                     canid: 2,
@@ -119,7 +120,7 @@ fn main() {
                 msg.set_payload(payload);
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusTxIndexer { channel, msg, output } => {
+            MasterpieceSimStep::MoteusTxIndexer { channel, msg, output } => {
                 let data = msg.payload().unwrap();
                 match data {
                     MotorCMD::Velocity(v, t) => {
@@ -136,7 +137,7 @@ fn main() {
                 }
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusRxTurretData { channel, msg } => {
+            MasterpieceSimStep::MoteusRxTurretData { channel, msg } => {
                 let motor = sim_turret_angle.borrow();
                 msg.set_payload(MoteusData {
                     canid: 3,
@@ -152,7 +153,7 @@ fn main() {
                 });
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusTxTurret { channel, msg, output } => {
+            MasterpieceSimStep::MoteusTxTurret { channel, msg, output } => {
                 let data = msg.payload().unwrap();
                 match data {
                     MotorCMD::Position(p, v, t) => {
@@ -169,7 +170,7 @@ fn main() {
                 }
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusRxShooterData { channel, msg } => {
+            MasterpieceSimStep::MoteusRxShooterData { channel, msg } => {
                 let motor = sim_shooter.borrow();
                 msg.set_payload(MoteusData {
                     canid: 4,
@@ -185,7 +186,7 @@ fn main() {
                 });
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::MoteusTxShooter { channel, msg, output } => {
+            MasterpieceSimStep::MoteusTxShooter { channel, msg, output } => {
                 let data = msg.payload().unwrap();
                 match data {
                     MotorCMD::Velocity(v, t) => {
@@ -202,7 +203,7 @@ fn main() {
                 }
                 SimOverride::ExecutedBySim
             }
-            default::SimStep::BinaryServo(CuTaskCallbackState::Process(input, _output)) => {
+            MasterpieceSimStep::BinaryServo(CuTaskCallbackState::Process(input, _output)) => {
                 if let Some(deployed) = input.payload() {
                     let _ = sim_rec.log(
                         "actuators/binary_servo",
@@ -222,7 +223,7 @@ fn main() {
 
     debug!("Logger created at {}.", &logger_path);
     debug!("Creating application... ");
-    let mut application = MasterpieceApplication::builder()
+    let mut application = MasterpieceRuntime::builder()
         .with_sim_callback(&mut sim_callback)
         .with_clock(robot_clock)
         .with_log_path(&logger_path, PREALLOCATED_STORAGE_SIZE)

@@ -4,6 +4,22 @@
 evograph app:
   cargo run -p evograph -- "apps/{{app}}"
 
+# Run the Masterpiece simulation with its driver station.
+masterpiece-sim:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  cargo run -p evods &
+  EVODS_PID=$!
+
+  cleanup() {
+    kill "$EVODS_PID" 2>/dev/null || true
+    wait "$EVODS_PID" 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM
+
+  cargo run -p masterpiece --features=sim-debug --bin masterpiece-sim
+
 # Render the execution DAG from the app config.
 rcfg:
   #!/usr/bin/env bash

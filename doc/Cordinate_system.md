@@ -12,7 +12,7 @@ The global cordinate system is as follows
 origin point: Bottom left corner of field. 
 x: To the right
 y: Moving forward
-theta: Counter Clockwise.
+theta: Counter Clockwise. (0 is pointing up)
 
 
 ## Game spesific

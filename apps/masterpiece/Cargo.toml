@@ -25,14 +25,20 @@ path = "src/resim.rs"
 required-features = ["sim-debug"]
 
 [[bin]]
+name = "masterpiece-twin"
+path = "src/twin.rs"
+required-features = ["sim-debug"]
+
+[[bin]]
 name = "masterpiece-evoviz-logreader"
 path = "src/evoviz_logreader.rs"
-required-features = ["logreader"]
+required-features = ["evoviz-logreader"]
 
 [features]
 default = []
-logreader = ["dep:cu29-export", "dep:evoviz_test"]
-sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug"]
+logreader = ["dep:cu29-export"]
+evoviz-logreader = ["logreader", "dep:evoviz_test"]
+sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug", "dep:cuviz", "dep:ctrlc"]
 
 [dependencies]
 cu29 = { workspace = true, features = ["reflect"] }
@@ -64,5 +70,7 @@ cu-logmon = { workspace = true }
 evosim = { workspace = true }
 evods = { workspace = true }
 evoviz_test = { path = "../../external/evoviz_test", optional = true }
+cuviz = { path = "../../external/cuviz-test/cuviz", features = ["logstream"], optional = true }
+ctrlc = { version = "3.5.2", optional = true }
 rerun = { workspace = true }
 cu-zenoh-bridge = { workspace = true }

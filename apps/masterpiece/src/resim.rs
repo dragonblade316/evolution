@@ -3,9 +3,10 @@
 // timestamps) that the lifecycle typestate deliberately does not expose.
 #![allow(deprecated)]
 
-mod messages;
-mod tasks;
-use masterpiece::bridges;
+use masterpiece::{
+    MasterpieceDataSet, MasterpieceSimStep, MasterpieceRuntime, bridges,
+    evo_visualizer, masterpiece_recorded_replay_step,
+};
 
 use cu29::prelude::memmap::{MmapSectionStorage, MmapUnifiedLoggerWrite};
 use cu29::prelude::*;
@@ -22,16 +23,13 @@ use std::path::{Path, PathBuf};
 const PREALLOCATED_STORAGE_SIZE: Option<usize> = Some(1024 * 1024 * 100);
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 
-#[copper_runtime(config = "copperconfig.ron", sim_mode = true)]
-struct MasterpieceAppReSim {}
-
-type ReplayCopperList = CopperList<default::CuStampedDataSet>;
+type ReplayCopperList = CopperList<MasterpieceDataSet>;
 type ReplayBuildCallback =
     for<'a> fn(
         &'a ReplayCopperList,
         RobotClock,
         RobotClockMock,
-    ) -> Box<dyn for<'z> FnMut(default::SimStep<'z>) -> SimOverride + 'a>;
+    ) -> Box<dyn for<'z> FnMut(MasterpieceSimStep<'z>) -> SimOverride + 'a>;
 type ReplayTimeExtractor = fn(&ReplayCopperList) -> Option<CuTime>;
 
 fn default_log_base() -> PathBuf {
@@ -46,17 +44,17 @@ fn default_replay_log_base() -> PathBuf {
         .join(format!("{APP_NAME}_resim.copper"))
 }
 
-fn default_callback(step: default::SimStep<'_>) -> SimOverride {
+fn default_callback(step: MasterpieceSimStep<'_>) -> SimOverride {
     match step {
         //motors
-        default::SimStep::MoteusRxDriveLeftData { channel, msg } => SimOverride::ExecutedBySim,
-        default::SimStep::MoteusRxDriveRightData { channel, msg } => SimOverride::ExecutedBySim,
-        default::SimStep::MoteusRxShooterData { channel, msg } => SimOverride::ExecutedBySim,
-        default::SimStep::MoteusRxTurretData { channel, msg } => SimOverride::ExecutedBySim,
+        MasterpieceSimStep::MoteusRxDriveLeftData { channel, msg } => SimOverride::ExecutedBySim,
+        MasterpieceSimStep::MoteusRxDriveRightData { channel, msg } => SimOverride::ExecutedBySim,
+        MasterpieceSimStep::MoteusRxShooterData { channel, msg } => SimOverride::ExecutedBySim,
+        MasterpieceSimStep::MoteusRxTurretData { channel, msg } => SimOverride::ExecutedBySim,
         //ds
-        default::SimStep::EvoDsBridgeRxCommand { channel, msg } => SimOverride::ExecutedBySim,
+        MasterpieceSimStep::EvoDsBridgeRxCommand { channel, msg } => SimOverride::ExecutedBySim,
         //sensors
-        _ => SimOverride::ExecuteByRuntime
+        _ => SimOverride::ExecuteByRuntime,
     }
 }
 
@@ -64,27 +62,29 @@ fn build_callback<'a>(
     copperlist: &'a ReplayCopperList,
     _process_clock: RobotClock,
     _clock_for_callbacks: RobotClockMock,
-) -> Box<dyn for<'z> FnMut(default::SimStep<'z>) -> SimOverride + 'a> {
-    Box::new(move |step: default::SimStep<'_>| default::recorded_replay_step(step, copperlist))
+) -> Box<dyn for<'z> FnMut(MasterpieceSimStep<'z>) -> SimOverride + 'a> {
+    Box::new(move |step: MasterpieceSimStep<'_>| masterpiece_recorded_replay_step(step, copperlist))
 }
 
 fn extract_time(copperlist: &ReplayCopperList) -> Option<CuTime> {
     cu29::simulation::recorded_copperlist_timestamp(copperlist)
 }
 
-fn make_app(log_base: &Path) -> CuResult<(MasterpieceAppReSim, RobotClock, RobotClockMock)> {
+fn make_app(log_base: &Path) -> CuResult<(MasterpieceRuntime, RobotClock, RobotClockMock)> {
     let (clock, clock_mock) = RobotClock::mock();
-    let app = MasterpieceAppReSim::builder()
+    let app = MasterpieceRuntime::builder()
         .with_clock(clock.clone())
         .with_log_path(log_base, PREALLOCATED_STORAGE_SIZE)?
         .with_sim_callback(&mut default_callback)
-        .build()?;
+        .build()?
+        .into_inner();
     Ok((app, clock, clock_mock))
 }
 
 fn run_one_shot(log_base: &Path, replay_log_base: &Path) -> CuResult<()> {
     remove_log_family(replay_log_base)?;
-    let (mut app, clock, clock_mock) = make_app(replay_log_base)?;
+    let (mut app, _clock, clock_mock) = make_app(replay_log_base)?;
+    let mut visualizer = evo_visualizer()?;
 
     app.start_all_tasks(&mut default_callback)?;
 
@@ -113,7 +113,7 @@ fn run_one_shot(log_base: &Path, replay_log_base: &Path) -> CuResult<()> {
         return Err(CuError::from("expected read logger for copperlists"));
     };
     let mut reader = UnifiedLoggerIOReader::new(dl, UnifiedLogType::CopperList);
-    for entry in copperlists_reader::<default::CuStampedDataSet>(&mut reader) {
+    for entry in copperlists_reader::<MasterpieceDataSet>(&mut reader) {
         if let Some(kf) = keyframes.peek() {
             if kf.culistid == entry.id {
                 app.copper_runtime_mut().lock_keyframe(kf);
@@ -128,7 +128,12 @@ fn run_one_shot(log_base: &Path, replay_log_base: &Path) -> CuResult<()> {
             clock_mock.set_value(ts.as_nanos());
         }
 
-        let mut sim_callback = build_callback(&entry, clock.clone(), clock_mock.clone());
+        let mut sim_callback = |step: MasterpieceSimStep<'_>| match step {
+            MasterpieceSimStep::CopperListCompleted(copperlist) => {
+                visualizer.copperlist_completed(copperlist)
+            }
+            step => masterpiece_recorded_replay_step(step, &entry),
+        };
         app.run_one_iteration(&mut sim_callback)?;
     }
 
@@ -140,7 +145,7 @@ fn run_one_shot(log_base: &Path, replay_log_base: &Path) -> CuResult<()> {
 fn app_factory(
     params: &SessionOpenParams,
     replay_template: &Path,
-) -> CuResult<(MasterpieceAppReSim, RobotClock, RobotClockMock)> {
+) -> CuResult<(MasterpieceRuntime, RobotClock, RobotClockMock)> {
     let replay_log_base = per_session_replay_log_base(
         replay_template,
         [params.role.as_deref().unwrap_or("session")],
@@ -156,8 +161,8 @@ fn run_remote_debug_server(
 ) -> CuResult<()> {
     let replay_template = replay_log_base.to_path_buf();
     serve_remote_debug::<
-        MasterpieceAppReSim,
-        default::CuStampedDataSet,
+        MasterpieceRuntime,
+        MasterpieceDataSet,
         ReplayBuildCallback,
         ReplayTimeExtractor,
         MmapSectionStorage,

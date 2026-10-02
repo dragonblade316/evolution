@@ -34,12 +34,25 @@ pub enum RequestedRobotState {
     EStopped,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DriverStationSnapshot {
     pub robot: RobotStatus,
     pub requested_state: RequestedRobotState,
+    pub allience: common::Allience,
     pub gamepad: GamepadSnapshot,
     pub telemetry: Arc<BTreeMap<String, serde_json::Value>>,
+}
+
+impl Default for DriverStationSnapshot {
+    fn default() -> Self {
+        Self {
+            robot: RobotStatus::default(),
+            requested_state: RequestedRobotState::default(),
+            allience: common::Allience::BLUE,
+            gamepad: GamepadSnapshot::default(),
+            telemetry: Arc::default(),
+        }
+    }
 }
 
 fn decode_telemetry(payload: &[u8]) -> serde_json::Result<serde_json::Value> {
@@ -60,7 +73,10 @@ fn apply_ui_command(
     status: &mut DriverStationSnapshot,
 ) {
     match command {
-        UiCommand::SetAllience(allience) => ds_state.allience = allience,
+        UiCommand::SetAllience(allience) => {
+            ds_state.allience = allience.clone();
+            status.allience = allience;
+        }
         UiCommand::Enable
             if !ds_state.estop && status.robot == RobotStatus::Connected =>
         {
