@@ -8,7 +8,6 @@ common = { workspace = true }
 cu29 = { workspace = true }
 cu-spatial-payloads = { workspace = true }
 cu-sensor-payloads = { workspace = true }
-cu-apriltag = { workspace = true }
 kalman_filters = { workspace = true }
 kfilter = { workspace = true }
 nalgebra = { workspace = true }

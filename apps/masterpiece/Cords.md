@@ -2,8 +2,7 @@
 0,0: Bottom left corner of field (under blue goal).
 References: https://cad.onshape.com/documents/86432d646d0660b684221b23/w/3b664cdb777611961f568e71/e/b7cc4fb10fdfb3e7f966bb2d
 
-All measurements in meters and degrees
-.
+All measurements in meters and degrees.
 
 ### red apriltag: 
 x: 2.23141
@@ -28,3 +27,41 @@ z: 0.551
 x: 0.035
 y: 0.081
 z: 0.551
+
+
+Camera specs:
+{
+    "camera": "Arducam OV9281 USB Camera (0c45:6366)",
+    "platform": "Windows NT 10.0; Win64; x64",
+    "avg_reprojection_error": 0.17181088349298285,
+    "camera_matrix": [
+        [
+            1077.5364936413373,
+            0,
+            605.5026981265167
+        ],
+        [
+            0,
+            1077.7948707218447,
+            399.29058993159094
+        ],
+        [
+            0,
+            0,
+            1
+        ]
+    ],
+    "distortion_coefficients": [
+        -0.4440740018340274,
+        0.28507859369478245,
+        -0.0017793403743950164,
+        0.0018544863648542827,
+        -0.1292958676004712
+    ],
+    "distortion_model": "rectilinear",
+    "img_size": [
+        1280,
+        720
+    ],
+    "calibration_time": "Sat, 27 Jun 2026 17:36:17 GMT"
+}

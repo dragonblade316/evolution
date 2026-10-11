@@ -21,10 +21,55 @@
         kind: task,
     ),
         (
-        id: "apriltag",
-        type: "tasks::AprilTagSource",
+        id: "camera",
+        type: "cu_v4l::V4l",
         kind: source,
-        run_in_sim: true,
+        run_in_sim: false,
+        config: {
+            "device": 0,
+            "width": 1280,
+            "height": 720,
+            "fourcc": "GREY",
+            "buffers": 4,
+            "timeout_ms": 500,
+        },
+    ),
+        (
+        id: "apriltag_detector",
+        type: "cu_apriltag::AprilTags",
+        kind: task,
+        config: {
+            "family": "tag16h5",
+            "bits_corrected": 1,
+            "tag_size": 0.0,
+            "fx": 1077.5364936413373,
+            "fy": 1077.7948707218447,
+            "cx": 605.5026981265167,
+            "cy": 399.29058993159094,
+        },
+    ),
+        (
+        id: "apriltag_pose",
+        type: "apriltag_tasks::AprilTagPoseProcessor",
+        kind: task,
+        config: {
+            "tags": [
+                {
+                    "id": 0,
+                    "field_pose": {
+                        "translation_m": [0.0, 0.0, 0.0],
+                        "rotation_radians": [0.0, 0.0, 0.0],
+                    },
+                },
+            ],
+            "robot_to_camera_pose": {
+                "translation_m": [0.0, 0.0, 0.0],
+                "rotation_radians": [0.0, 0.0, 0.0],
+            },
+            "min_decision_margin": 0.0,
+            "ground_z_m": 0.0,
+            "max_ground_distance_m": 0.25,
+        },
     ),
         (
         id: "poselog",
@@ -211,9 +256,19 @@
         msg: "common::ChassisSpeeds",
     ),
         (
-        src: "apriltag",
-        dst: "pose_estimator",
+        src: "camera",
+        dst: "apriltag_detector",
+        msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
+    ),
+        (
+        src: "apriltag_detector",
+        dst: "apriltag_pose",
         msg: "cu_apriltag::AprilTagDetections",
+    ),
+        (
+        src: "apriltag_pose",
+        dst: "pose_estimator",
+        msg: "cu_spatial_payloads::Pose<f32>",
     ),
         (
         src: "pose_estimator",

@@ -17,6 +17,7 @@ cu29 = "1.2.1"
 cu-spatial-payloads = "1.2.1"
 cu-sensor-payloads = "1.2.1"
 cu-apriltag = "1.2.1"
+cu-v4l = "1.2.1"
 cu-logmon = "1.2.1"
 cu29-export = { version = "1.2.1" }
 cu-zenoh-bridge = "1.2.1"
@@ -50,6 +51,7 @@ field_oriented_diff_drive = { path = "./components/tasks/field_oriented_diff_dri
 iekflocalizer = { path = "./components/tasks/iekflocalizer/" }
 moteus_tasks = { path = "./components/tasks/moteus_tasks/" }
 allience_spesific_tasks = { path = "./components/tasks/allience_spesific_tasks/" }
+apriltag_tasks = { path = "./components/tasks/apriltag_tasks/" }
 sotm_rt = { path = "./components/tasks/sotm_rt/" }
 turret_tasks = { path = "./components/tasks/turret_tasks/" }
 evoviz = { path = "./components/sinks/evoviz/" }

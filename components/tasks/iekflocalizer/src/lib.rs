@@ -1,9 +1,7 @@
 use std::collections::VecDeque;
-use std::time::Instant;
 
 use cu29::prelude::*;
 use common::ChassisSpeeds;
-use cu_apriltag::AprilTagDetections;
 use cu_spatial_payloads::{Pose, Transform3D};
 use cu29::cutask::{CuMsg, CuTask, Freezable};
 use cu29::reflect::Reflect;
@@ -67,35 +65,34 @@ impl IEKF {
 #[derive(Clone)]
 struct TimeMachineIEKF {
     iekf: IEKF,
-    //not technically needed but whatev
-    last: Instant,
-    buf: VecDeque<(Instant, (ChassisSpeeds, Isometry2F64, Matrix3<f64>))>
+    last: Option<CuTime>,
+    buf: VecDeque<(CuTime, (ChassisSpeeds, Isometry2F64, Matrix3<f64>))>,
 }
 
 impl TimeMachineIEKF {
-    fn update(&mut self, speeds: ChassisSpeeds, timestamp: Instant) {
-        // sophus SE(2) tangent order is (theta, x, y) — rotation first.
-        let twist = Vector3::new(
-            speeds.theta.get::<radian_per_second>() as f64,
-            speeds.x.get::<meter_per_second>() as f64,
-            speeds.y.get::<meter_per_second>() as f64,
-        );
-        self.iekf.predict(twist, timestamp.duration_since(self.last).as_secs_f64());
-        self.buf.push_back((timestamp, (speeds, self.iekf.pose, self.iekf.P)));
-
-        //since we start
-        for i in 0..self.buf.len() - 1 {
-            if timestamp.duration_since(self.buf[i].0).as_secs_f64() > 1.5 {
-                let _ = self.buf.pop_front();
-            } else {
-                //There should never be a situation where there is an entry newer further up in the list
-                break
-            }
+    fn update(&mut self, speeds: ChassisSpeeds, timestamp: CuTime) {
+        if let Some(last) = self.last {
+            // sophus SE(2) tangent order is (theta, x, y) — rotation first.
+            let twist = Vector3::new(
+                speeds.theta.get::<radian_per_second>() as f64,
+                speeds.x.get::<meter_per_second>() as f64,
+                speeds.y.get::<meter_per_second>() as f64,
+            );
+            let dt = (timestamp - last).as_nanos() as f64 / 1_000_000_000.0;
+            self.iekf.predict(twist, dt);
         }
-        self.last = timestamp;
+        self.buf
+            .push_back((timestamp, (speeds, self.iekf.pose, self.iekf.P)));
+
+        while self.buf.front().is_some_and(|(buffered_at, _)| {
+            (timestamp - *buffered_at).as_nanos() > 1_500_000_000
+        }) {
+            self.buf.pop_front();
+        }
+        self.last = Some(timestamp);
     }
 
-    fn update_vision(&mut self, pose: &Transform3D<f32>, timestamp: Instant) {
+    fn update_vision(&mut self, pose: &Transform3D<f32>, timestamp: CuTime) {
         let mat = pose.to_matrix();
         let x = mat[0][3] as f64;
         let y = mat[1][3] as f64;
@@ -113,8 +110,11 @@ impl TimeMachineIEKF {
         }
         let (t0, (_, iso0, P0)) = &self.buf[pos - 1];
         let (t1, (_, iso1, P1)) = &self.buf[pos];
-        let total = t1.duration_since(*t0).as_secs_f64();
-        let elapsed = timestamp.duration_since(*t0).as_secs_f64();
+        let total = (*t1 - *t0).as_nanos() as f64 / 1_000_000_000.0;
+        if total == 0.0 {
+            return;
+        }
+        let elapsed = (timestamp - *t0).as_nanos() as f64 / 1_000_000_000.0;
         let w = elapsed / total;
         let interpolated_pose = iso0.interpolate(iso1, w);
         let interpolated_P = Self::interpolate_cov(P0, P1, w);
@@ -126,7 +126,7 @@ impl TimeMachineIEKF {
         let mut prev_t = timestamp;
         for i in pos..self.buf.len() {
             let (t, (speeds, _, _)) = &self.buf[i];
-            let dt = t.duration_since(prev_t).as_secs_f64();
+            let dt = (*t - prev_t).as_nanos() as f64 / 1_000_000_000.0;
             let twist = Vector3::new(
                 speeds.theta.get::<radian_per_second>() as f64,
                 speeds.x.get::<meter_per_second>() as f64,
@@ -148,6 +148,14 @@ impl TimeMachineIEKF {
         iso_to_pose(&self.iekf.pose)
     }
 
+}
+
+fn message_time(tov: Tov, fallback: CuTime) -> CuTime {
+    match tov {
+        Tov::Time(time) => time,
+        Tov::Range(range) => range.end,
+        Tov::None => fallback,
+    }
 }
 
 fn iso_to_pose(iso: &Isometry2F64) -> Pose<f64> {
@@ -204,7 +212,7 @@ pub struct IEKFPoseEstimator {
 impl Freezable for IEKFPoseEstimator {}
 
 impl CuTask for IEKFPoseEstimator {
-    type Input<'m> = input_msg!('m, ChassisSpeeds, AprilTagDetections);
+    type Input<'m> = input_msg!('m, ChassisSpeeds, Pose<f32>);
     type Output<'m> = output_msg!(Pose<f64>, ChassisSpeeds);
     type Resources<'r> = ();
 
@@ -223,7 +231,7 @@ impl CuTask for IEKFPoseEstimator {
         };
         let tm = TimeMachineIEKF {
             iekf,
-            last: std::time::Instant::now(),
+            last: None,
             buf: VecDeque::new(),
         };
         let speeds = ChassisSpeeds {
@@ -240,18 +248,16 @@ impl CuTask for IEKFPoseEstimator {
         input: &Self::Input<'_>,
         output: &mut Self::Output<'_>,
     ) -> cu29::CuResult<()> {
-        let now = std::time::Instant::now();
+        let now = ctx.now();
         // debug!("hello world");
 
         if let Some(speeds) = input.0.payload() {
-            self.tm.update(speeds.clone(), now);
+            self.tm
+                .update(speeds.clone(), message_time(input.0.tov, now));
             self.speeds = speeds.clone();
         }
-        if let Some(detections) = input.1.payload() {
-            let best = detections.filtered_by_decision_margin(0.0).next();
-            if let Some((_id, pose, _margin)) = best {
-                self.tm.update_vision(pose, now);
-            }
+        if let Some(pose) = input.1.payload() {
+            self.tm.update_vision(pose, message_time(input.1.tov, now));
         }
 
         output.0.set_payload(self.tm.get_pose());

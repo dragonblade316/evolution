@@ -203,6 +203,10 @@ fn main() {
                 }
                 SimOverride::ExecutedBySim
             }
+            MasterpieceSimStep::Camera(CuTaskCallbackState::Process(_, output)) => {
+                output.clear_payload();
+                SimOverride::ExecutedBySim
+            }
             MasterpieceSimStep::BinaryServo(CuTaskCallbackState::Process(input, _output)) => {
                 if let Some(deployed) = input.payload() {
                     let _ = sim_rec.log(

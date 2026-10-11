@@ -48,6 +48,7 @@ rapier2d = { workspace = true }
 glam = { workspace = true }
 common = { workspace = true }
 cu-spatial-payloads = { workspace = true }
+cu-sensor-payloads = { workspace = true }
 bincode.workspace = true
 
 moteus_bridge = { workspace = true }
@@ -61,11 +62,13 @@ field_oriented_diff_drive = { workspace = true }
 iekflocalizer = { workspace = true }
 moteus_tasks = { workspace = true }
 allience_spesific_tasks = { workspace = true }
+apriltag_tasks = { workspace = true }
 sotm_rt = { workspace = true }
 turret_tasks = { workspace = true }
 evoviz = { workspace = true }
 rpsinks = { workspace = true }
 cu-apriltag = { workspace = true }
+cu-v4l = { workspace = true }
 cu-logmon = { workspace = true }
 evosim = { workspace = true }
 evods = { workspace = true }

@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cu29 = { workspace = true }
+cu-apriltag = { workspace = true }
+cu-spatial-payloads = { workspace = true }
+serde = { workspace = true }
