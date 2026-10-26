@@ -15,6 +15,7 @@ use crate::indexer::ComponentCatalog;
 use crate::model::{
     ComponentDescriptor, ComponentKind, ConstantDefinition, DiagnosticSeverity, EditableConfig,
     GraphDocument, GraphNode, MonitorInstance, NumericStorage, PortDescriptor, PortDirection,
+    NC_ENDPOINT,
 };
 use crate::project::{ProjectInfo, atomic_write};
 
@@ -24,6 +25,7 @@ type EditorState = Snarl<UiNode>;
 struct UiNode {
     component_type: String,
     model_id: String,
+    model_index: usize,
     kind: ComponentKind,
     side: BridgeSide,
     inputs: Vec<PortDescriptor>,
@@ -35,11 +37,13 @@ impl UiNode {
         component: &ComponentDescriptor,
         component_type: String,
         model_id: String,
+        model_index: usize,
         side: BridgeSide,
     ) -> Self {
         Self {
             component_type,
             model_id,
+            model_index,
             kind: component.kind,
             side,
             inputs: if side == BridgeSide::Receive {
@@ -142,6 +146,7 @@ impl CameraState {
 enum GraphAction {
     Add(ComponentDescriptor, egui::Pos2),
     Delete(NodeId),
+    OpenImport(String),
 }
 
 struct GraphViewer<'a> {
@@ -207,6 +212,10 @@ impl SnarlViewer<UiNode> for GraphViewer<'_> {
         let node = &snarl[node];
         let side = node.side.label().unwrap_or(node.kind.label());
         ui.label(egui::RichText::new(format!("{side} · {}", node.component_type)).small());
+        if node.kind == ComponentKind::Import && ui.small_button("Open graph").clicked() {
+            self.actions
+                .push(GraphAction::OpenImport(node.component_type.clone()));
+        }
     }
 
     fn header_frame(
@@ -221,14 +230,11 @@ impl SnarlViewer<UiNode> for GraphViewer<'_> {
     }
 
     fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<UiNode>) {
-        let source_id = snarl[from.id.node].model_id.clone();
-        let target_id = snarl[to.id.node].model_id.clone();
-        let Some(source) = self.document.nodes.iter().position(|node| node.id == source_id) else {
+        let source = snarl[from.id.node].model_index;
+        let target = snarl[to.id.node].model_index;
+        if self.document.nodes.get(source).is_none() || self.document.nodes.get(target).is_none() {
             return;
-        };
-        let Some(target) = self.document.nodes.iter().position(|node| node.id == target_id) else {
-            return;
-        };
+        }
         let previous = self
             .document
             .edges
@@ -339,6 +345,13 @@ impl SnarlViewer<UiNode> for GraphViewer<'_> {
         ui: &mut egui::Ui,
         _snarl: &mut Snarl<UiNode>,
     ) {
+        if _snarl[node].kind == ComponentKind::Import
+            && ui.button("Open graph").clicked()
+        {
+            self.actions
+                .push(GraphAction::OpenImport(_snarl[node].component_type.clone()));
+            ui.close();
+        }
         if ui.button("Delete").clicked() {
             self.actions.push(GraphAction::Delete(node));
             ui.close();
@@ -367,6 +380,7 @@ impl SnarlViewer<UiNode> for GraphViewer<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
     Graph,
+    Missions,
     Constants,
     Monitors,
 }
@@ -415,6 +429,7 @@ pub struct EvographApp {
     dirty: bool,
     overwrite_dialog: bool,
     new_config_key: String,
+    new_mission: String,
     transform_draft: TransformDraft,
     show_transform_wizard: bool,
     watcher: Option<RecommendedWatcher>,
@@ -422,6 +437,7 @@ pub struct EvographApp {
     layout_path: Option<PathBuf>,
     layout: EvoNodeLayout,
     layout_save_after: Option<Instant>,
+    config_history: Vec<PathBuf>,
 }
 
 impl EvographApp {
@@ -442,6 +458,7 @@ impl EvographApp {
             dirty: false,
             overwrite_dialog: false,
             new_config_key: String::new(),
+            new_mission: String::new(),
             transform_draft: TransformDraft::default(),
             show_transform_wizard: false,
             watcher: None,
@@ -452,6 +469,7 @@ impl EvographApp {
                 ..Default::default()
             },
             layout_save_after: None,
+            config_history: Vec::new(),
         };
         if let Some(path) = initial_path {
             app.open_project(&path);
@@ -485,6 +503,7 @@ impl EvographApp {
                             project.app_manifest.to_string_lossy().as_ref(),
                         ));
                         self.layout_save_after = None;
+                        self.config_history.clear();
                         self.project = Some(project);
                         self.catalog = catalog;
                         self.config = Some(config);
@@ -507,6 +526,103 @@ impl EvographApp {
                 }
             }
             Err(error) => self.status = format!("Could not open project: {error}"),
+        }
+    }
+
+    fn open_config_path(&mut self, path: &Path, fragment: bool) -> bool {
+        let loaded = if fragment {
+            ConfigFile::load_fragment(path, &self.catalog)
+        } else {
+            ConfigFile::load(path, &self.catalog)
+        };
+        match loaded {
+            Ok(config) => {
+                self.config = Some(config);
+                self.rebuild_editor();
+                self.dirty = false;
+                self.status = format!("Opened {}", path.display());
+                true
+            }
+            Err(error) => {
+                self.status = format!("Could not load config: {error}");
+                false
+            }
+        }
+    }
+
+    fn open_import(&mut self, include_path: &str) {
+        if self.dirty {
+            self.save(false);
+            if self.dirty {
+                return;
+            }
+        }
+        let Some(current) = self.config.as_ref().map(|config| config.path.clone()) else {
+            return;
+        };
+        let path = current
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(include_path);
+        if self.open_config_path(&path, true) {
+            self.config_history.push(current);
+        }
+    }
+
+    fn open_parent_config(&mut self) {
+        let Some(parent) = self.config_history.last().cloned() else {
+            return;
+        };
+        if self.dirty {
+            self.save(false);
+            if self.dirty {
+                return;
+            }
+        }
+        let is_root = self
+            .project
+            .as_ref()
+            .is_some_and(|project| project.config_path == parent);
+        if self.open_config_path(&parent, !is_root) {
+            self.config_history.pop();
+        }
+    }
+
+    fn import_file(&mut self, path: &Path) {
+        let Some(project) = &self.project else { return };
+        let Some(app_dir) = project.app_manifest.parent() else { return };
+        let config_dir = app_dir.join("config");
+        let canonical_config = config_dir.canonicalize().unwrap_or(config_dir);
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if !canonical_path.starts_with(&canonical_config) {
+            self.status = "Imported config files must be inside the app's config folder".into();
+            return;
+        }
+        let Some(current_dir) = self
+            .config
+            .as_ref()
+            .and_then(|config| config.path.parent())
+        else {
+            return;
+        };
+        let Ok(relative) = canonical_path.strip_prefix(current_dir) else {
+            self.status = "The imported file must be below the current config directory".into();
+            return;
+        };
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let Some(config) = &mut self.config else { return };
+        if config.document.nodes.iter().any(|node| {
+            node.kind == ComponentKind::Import && node.component_type == relative
+        }) {
+            self.status = "That config is already imported".into();
+            return;
+        }
+        match config.add_import(relative, &self.catalog) {
+            Ok(()) => {
+                self.rebuild_editor();
+                self.dirty = true;
+            }
+            Err(error) => self.status = format!("Could not import config: {error}"),
         }
     }
 
@@ -546,7 +662,8 @@ impl EvographApp {
             while let Ok(event) = rx.try_recv() {
                 if let Ok(event) = event
                     && event.paths.iter().any(|path| {
-                        path.extension().is_some_and(|ext| ext == "rs" || ext == "toml")
+                        path.extension()
+                            .is_some_and(|ext| ext == "rs" || ext == "toml" || ext == "ron")
                     })
                 {
                     relevant = true;
@@ -554,7 +671,7 @@ impl EvographApp {
             }
         }
         if relevant {
-            self.status = "Sources changed; click Reindex to refresh components".into();
+            self.status = "Project files changed; click Reindex to refresh".into();
         }
     }
 
@@ -572,7 +689,16 @@ impl EvographApp {
         if !self.dirty
             && let Some(path) = self.config.as_ref().map(|config| config.path.clone())
         {
-            match ConfigFile::load(path, &self.catalog) {
+            let is_fragment = self
+                .project
+                .as_ref()
+                .is_some_and(|project| project.config_path != path);
+            let loaded = if is_fragment {
+                ConfigFile::load_fragment(&path, &self.catalog)
+            } else {
+                ConfigFile::load(&path, &self.catalog)
+            };
+            match loaded {
                 Ok(config) => {
                     self.config = Some(config);
                     self.rebuild_editor();
@@ -611,6 +737,7 @@ impl EvographApp {
                     &component,
                     &node.component_type,
                     &node.id,
+                    index,
                     BridgeSide::Receive,
                     base_position,
                 );
@@ -618,6 +745,7 @@ impl EvographApp {
                     &component,
                     &node.component_type,
                     &node.id,
+                    index,
                     BridgeSide::Transmit,
                     base_position + egui::vec2(250.0, 0.0),
                 );
@@ -631,6 +759,7 @@ impl EvographApp {
                     &component,
                     node.component_type.clone(),
                     node.id.clone(),
+                    index,
                     BridgeSide::Regular,
                 );
                 let position = self.layout_position(&ui_data, base_position);
@@ -681,6 +810,7 @@ impl EvographApp {
         component: &ComponentDescriptor,
         component_type: &str,
         model_id: &str,
+        model_index: usize,
         side: BridgeSide,
         position: egui::Pos2,
     ) -> NodeId {
@@ -688,16 +818,41 @@ impl EvographApp {
             component,
             component_type.to_string(),
             model_id.to_string(),
+            model_index,
             side,
         );
         let position = self.layout_position(&ui_data, position);
         self.editor.insert_node(position, ui_data)
     }
 
+    fn current_layout_key(&self, node: &UiNode) -> String {
+        let mut key = layout_key(node);
+        let Some(config) = &self.config else { return key };
+        if config
+            .document
+            .nodes
+            .iter()
+            .filter(|candidate| candidate.id == node.model_id)
+            .count()
+            > 1
+        {
+            key.push_str(&format!(":instance:{}", node.model_index));
+        }
+        let is_root = self
+            .project
+            .as_ref()
+            .is_some_and(|project| project.config_path == config.path);
+        if is_root {
+            key
+        } else {
+            format!("file:{}:{key}", config.path.display())
+        }
+    }
+
     fn layout_position(&self, node: &UiNode, fallback: egui::Pos2) -> egui::Pos2 {
         self.layout
             .positions
-            .get(&layout_key(node))
+            .get(&self.current_layout_key(node))
             .map(|position| egui::pos2(position.x, position.y))
             .unwrap_or(fallback)
     }
@@ -722,10 +877,10 @@ impl EvographApp {
         let Some(path) = self.layout_path.clone() else {
             return Ok(());
         };
-        let mut positions = BTreeMap::new();
+        let mut positions = self.layout.positions.clone();
         for (_, position, node) in self.editor.nodes_pos_ids() {
             positions.insert(
-                layout_key(node),
+                self.current_layout_key(node),
                 NodePosition {
                     x: position.x,
                     y: position.y,
@@ -743,13 +898,13 @@ impl EvographApp {
 
     fn selected_model_index(&self) -> Option<usize> {
         let graph_id = self.selected_node?;
-        let model_id = &self.editor.get_node(graph_id)?.model_id;
+        let index = self.editor.get_node(graph_id)?.model_index;
         self.config
             .as_ref()?
             .document
             .nodes
-            .iter()
-            .position(|node| &node.id == model_id)
+            .get(index)
+            .map(|_| index)
     }
 
     fn clear_node_selection(&mut self) {
@@ -762,7 +917,7 @@ impl EvographApp {
             .nodes_pos_ids()
             .map(|(_, position, node)| {
                 (
-                    layout_key(node),
+                    self.current_layout_key(node),
                     NodePosition {
                         x: position.x,
                         y: position.y,
@@ -778,6 +933,7 @@ impl EvographApp {
                 GraphAction::Add(component, position) => {
                     let Some(config) = &mut self.config else { continue };
                     let id = config.document.unique_id_for(&component.display_name);
+                    let model_index = config.document.nodes.len();
                     config
                         .document
                         .nodes
@@ -789,6 +945,7 @@ impl EvographApp {
                                 &component,
                                 component.type_path.clone(),
                                 id.clone(),
+                                model_index,
                                 BridgeSide::Receive,
                             ),
                         );
@@ -798,6 +955,7 @@ impl EvographApp {
                                 &component,
                                 component.type_path.clone(),
                                 id,
+                                model_index,
                                 BridgeSide::Transmit,
                             ),
                         );
@@ -808,6 +966,7 @@ impl EvographApp {
                                 &component,
                                 component.type_path.clone(),
                                 id,
+                                model_index,
                                 BridgeSide::Regular,
                             ),
                         );
@@ -815,13 +974,14 @@ impl EvographApp {
                     self.dirty = true;
                     self.mark_layout_dirty();
                 }
+                GraphAction::OpenImport(path) => self.open_import(&path),
                 GraphAction::Delete(node_id) => {
                     let Some(node) = self.editor.get_node(node_id).cloned() else { continue };
                     let matching = self
                         .editor
                         .node_ids()
                         .filter_map(|(id, candidate)| {
-                            (candidate.model_id == node.model_id).then_some(id)
+                            (candidate.model_index == node.model_index).then_some(id)
                         })
                         .collect::<Vec<_>>();
                     for id in matching {
@@ -829,23 +989,33 @@ impl EvographApp {
                     }
                     self.selected_node = None;
                     let Some(config) = &mut self.config else { continue };
-                    if let Some(index) = config
-                        .document
-                        .nodes
-                        .iter()
-                        .position(|candidate| candidate.id == node.model_id)
-                    {
+                    let index = node.model_index;
+                    if config.document.nodes.get(index).is_some() {
                         config.document.nodes.remove(index);
                         config
                             .document
                             .edges
                             .retain(|edge| edge.source != index && edge.target != index);
+                        config
+                            .document
+                            .unconnected_outputs
+                            .retain(|output| output.source != index);
                         for edge in &mut config.document.edges {
                             if edge.source > index {
                                 edge.source -= 1;
                             }
                             if edge.target > index {
                                 edge.target -= 1;
+                            }
+                        }
+                        for output in &mut config.document.unconnected_outputs {
+                            if output.source > index {
+                                output.source -= 1;
+                            }
+                        }
+                        for graph_node in self.editor.nodes_mut() {
+                            if graph_node.model_index > index {
+                                graph_node.model_index -= 1;
                             }
                         }
                         self.dirty = true;
@@ -913,6 +1083,9 @@ impl EvographApp {
     }
 
     fn toolbar(&mut self, root: &mut egui::Ui) {
+        let mut add_import = false;
+        let mut new_import = false;
+        let mut go_back = false;
         egui::Panel::top("toolbar").show(root, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Open folder…").clicked()
@@ -927,8 +1100,21 @@ impl EvographApp {
                 if ui.button("Reindex").clicked() {
                     self.reindex();
                 }
+                if ui
+                    .add_enabled(!self.config_history.is_empty(), egui::Button::new("Back"))
+                    .clicked()
+                {
+                    go_back = true;
+                }
+                if ui.button("Add import…").clicked() {
+                    add_import = true;
+                }
+                if ui.button("New import…").clicked() {
+                    new_import = true;
+                }
                 ui.separator();
                 ui.selectable_value(&mut self.view, View::Graph, "Graph");
+                ui.selectable_value(&mut self.view, View::Missions, "Missions");
                 ui.selectable_value(&mut self.view, View::Constants, "Constants");
                 ui.selectable_value(&mut self.view, View::Monitors, "Monitors");
                 ui.separator();
@@ -951,6 +1137,51 @@ impl EvographApp {
                 ui.label(&self.status);
             });
         });
+        if go_back {
+            self.open_parent_config();
+        }
+        let config_dir = self.project.as_ref().and_then(|project| {
+            project
+                .app_manifest
+                .parent()
+                .map(|directory| directory.join("config"))
+        });
+        if add_import
+            && let Some(directory) = &config_dir
+            && let Some(path) = rfd::FileDialog::new()
+                .set_directory(directory)
+                .add_filter("Copper config", &["ron"])
+                .pick_file()
+        {
+            self.import_file(&path);
+        }
+        if new_import
+            && let Some(directory) = &config_dir
+        {
+            if let Err(error) = fs::create_dir_all(directory) {
+                self.status = format!("Could not create config folder: {error}");
+                return;
+            }
+            if let Some(mut path) = rfd::FileDialog::new()
+                .set_directory(directory)
+                .add_filter("Copper config", &["ron"])
+                .save_file()
+            {
+                if path.extension().is_none() {
+                    path.set_extension("ron");
+                }
+                if !path.starts_with(directory) {
+                    self.status = "Imported config files must be inside the app's config folder".into();
+                } else if path.exists() {
+                    self.import_file(&path);
+                } else {
+                    match atomic_write(&path, b"(\n    tasks: [],\n    cnx: [],\n)\n") {
+                        Ok(()) => self.import_file(&path),
+                        Err(error) => self.status = format!("Could not create import: {error}"),
+                    }
+                }
+            }
+        }
     }
 
     fn graph_view(&mut self, root: &mut egui::Ui) {
@@ -1031,6 +1262,7 @@ impl EvographApp {
                     .map(|component| component.config_hints.clone())
                     .unwrap_or_default();
                 let Some(config) = &mut self.config else { return };
+                let missions = config.document.missions.clone();
                 let other_ids = config
                     .document
                     .nodes
@@ -1041,20 +1273,24 @@ impl EvographApp {
                     .collect::<HashSet<_>>();
                 let Some(node) = config.document.nodes.get_mut(index) else { return };
                 ui.label(&node.component_type);
-                let old_id = node.id.clone();
-                if ui.text_edit_singleline(&mut node.id).changed() {
-                    if other_ids.contains(&node.id) {
-                        self.status = format!("Node ID '{}' is already in use", node.id);
-                        node.id = old_id;
-                        return;
-                    }
-                    self.editor.nodes_mut().for_each(|graph_node| {
-                        if graph_node.model_id == old_id {
-                            graph_node.model_id = node.id.clone();
+                if node.kind == ComponentKind::Import {
+                    ui.label("Import paths are changed by removing and re-adding the import.");
+                } else {
+                    let old_id = node.id.clone();
+                    if ui.text_edit_singleline(&mut node.id).changed() {
+                        if other_ids.contains(&node.id) {
+                            self.status = format!("Node ID '{}' is already in use", node.id);
+                            node.id = old_id;
+                            return;
                         }
-                    });
-                    self.dirty = true;
-                    layout_changed = true;
+                        self.editor.nodes_mut().for_each(|graph_node| {
+                            if graph_node.model_index == index {
+                                graph_node.model_id = node.id.clone();
+                            }
+                        });
+                        self.dirty = true;
+                        layout_changed = true;
+                    }
                 }
                 ui.separator();
                 ui.heading("Optional configuration");
@@ -1073,7 +1309,12 @@ impl EvographApp {
                 }
                 edit_config(ui, &mut node.config, &mut self.new_config_key, &mut self.dirty);
                 ui.separator();
-                if node.kind != ComponentKind::Bridge {
+                ui.heading("Missions");
+                edit_missions(ui, &missions, &mut node.missions, &mut self.dirty);
+                ui.separator();
+                if node.kind == ComponentKind::Import {
+                    ui.label("Import parameters are shown above.");
+                } else if node.kind != ComponentKind::Bridge {
                     self.dirty |= edit_optional_bool(ui, "Run in background", &mut node.background);
                     self.dirty |= edit_optional_bool(ui, "Run in simulation", &mut node.run_in_sim);
                     self.dirty |=
@@ -1111,6 +1352,105 @@ impl EvographApp {
         if layout_changed {
             self.mark_layout_dirty();
         }
+    }
+
+    fn missions_view(&mut self, root: &mut egui::Ui) {
+        egui::CentralPanel::default().show(root, |ui| {
+            ui.heading("Missions");
+            let Some(config) = &mut self.config else {
+                ui.label("Open a project first.");
+                return;
+            };
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut self.new_mission);
+                if ui.button("Add mission").clicked() {
+                    let mission = self.new_mission.trim();
+                    if !mission.is_empty() && !config.document.missions.iter().any(|id| id == mission)
+                    {
+                        config.document.missions.push(mission.to_string());
+                        self.new_mission.clear();
+                        self.dirty = true;
+                    }
+                }
+            });
+            let mut remove_mission = None;
+            for index in 0..config.document.missions.len() {
+                ui.horizontal(|ui| {
+                    let old = config.document.missions[index].clone();
+                    if ui
+                        .text_edit_singleline(&mut config.document.missions[index])
+                        .changed()
+                    {
+                        let new = config.document.missions[index].clone();
+                        for node in &mut config.document.nodes {
+                            rename_mission(&mut node.missions, &old, &new);
+                        }
+                        for edge in &mut config.document.edges {
+                            rename_mission(&mut edge.missions, &old, &new);
+                        }
+                        for output in &mut config.document.unconnected_outputs {
+                            rename_mission(&mut output.missions, &old, &new);
+                        }
+                        self.dirty = true;
+                    }
+                    if ui.small_button("Remove").clicked() {
+                        remove_mission = Some(index);
+                    }
+                });
+            }
+            if let Some(index) = remove_mission {
+                let removed = config.document.missions.remove(index);
+                for node in &mut config.document.nodes {
+                    node.missions.retain(|mission| mission != &removed);
+                }
+                for edge in &mut config.document.edges {
+                    edge.missions.retain(|mission| mission != &removed);
+                }
+                for output in &mut config.document.unconnected_outputs {
+                    output.missions.retain(|mission| mission != &removed);
+                }
+                self.dirty = true;
+            }
+
+            ui.separator();
+            let missions = config.document.missions.clone();
+            let node_ids = config
+                .document
+                .nodes
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<Vec<_>>();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.collapsing("Tasks, bridges, and imports", |ui| {
+                    for node in &mut config.document.nodes {
+                        ui.group(|ui| {
+                            ui.strong(format!("{} · {}", node.id, node.kind.label()));
+                            edit_missions(ui, &missions, &mut node.missions, &mut self.dirty);
+                        });
+                    }
+                });
+                ui.collapsing("Connections", |ui| {
+                    for edge in &mut config.document.edges {
+                        let source = node_ids.get(edge.source).map(String::as_str).unwrap_or("?");
+                        let target = node_ids.get(edge.target).map(String::as_str).unwrap_or("?");
+                        ui.group(|ui| {
+                            ui.strong(format!("{source} → {target} · {}", edge.message_type));
+                            edit_missions(ui, &missions, &mut edge.missions, &mut self.dirty);
+                        });
+                    }
+                    for output in &mut config.document.unconnected_outputs {
+                        let source = node_ids
+                            .get(output.source)
+                            .map(String::as_str)
+                            .unwrap_or("?");
+                        ui.group(|ui| {
+                            ui.strong(format!("{source} → {NC_ENDPOINT} · {}", output.message_type));
+                            edit_missions(ui, &missions, &mut output.missions, &mut self.dirty);
+                        });
+                    }
+                });
+            });
+        });
     }
 
     fn constants_view(&mut self, root: &mut egui::Ui) {
@@ -1371,6 +1711,7 @@ impl eframe::App for EvographApp {
         self.diagnostics(ui);
         match self.view {
             View::Graph => self.graph_view(ui),
+            View::Missions => self.missions_view(ui),
             View::Constants => self.constants_view(ui),
             View::Monitors => self.monitors_view(ui),
         }
@@ -1405,6 +1746,7 @@ fn node_color(node: &UiNode) -> egui::Color32 {
         (ComponentKind::Sink, _) => egui::Color32::from_rgb(115, 65, 40),
         (ComponentKind::Bridge, _) => egui::Color32::from_rgb(100, 55, 115),
         (ComponentKind::Monitor, _) => egui::Color32::from_rgb(80, 80, 80),
+        (ComponentKind::Import, _) => egui::Color32::from_rgb(85, 65, 120),
         (ComponentKind::Unresolved, _) => egui::Color32::from_rgb(130, 45, 45),
     }
 }
@@ -1415,18 +1757,14 @@ fn remove_document_edge(
     from: OutPinId,
     to: InPinId,
 ) {
-    let source_id = &snarl[from.node].model_id;
-    let target_id = &snarl[to.node].model_id;
-    let source = document.nodes.iter().position(|node| &node.id == source_id);
-    let target = document.nodes.iter().position(|node| &node.id == target_id);
-    if let (Some(source), Some(target)) = (source, target) {
-        document.edges.retain(|edge| {
-            !(edge.source == source
-                && edge.source_port == from.output
-                && edge.target == target
-                && edge.target_port == to.input)
-        });
-    }
+    let source = snarl[from.node].model_index;
+    let target = snarl[to.node].model_index;
+    document.edges.retain(|edge| {
+        !(edge.source == source
+            && edge.source_port == from.output
+            && edge.target == target
+            && edge.target_port == to.input)
+    });
 }
 
 fn visual_label(id: &str, side: BridgeSide) -> String {
@@ -1586,6 +1924,44 @@ fn edit_constant(ui: &mut egui::Ui, constant: &mut ConstantDefinition, dirty: &m
     *dirty |= changed;
 }
 
+fn rename_mission(missions: &mut [String], old: &str, new: &str) {
+    for mission in missions {
+        if mission == old {
+            *mission = new.to_string();
+        }
+    }
+}
+
+fn edit_missions(
+    ui: &mut egui::Ui,
+    available: &[String],
+    selected: &mut Vec<String>,
+    dirty: &mut bool,
+) {
+    if available.is_empty() {
+        ui.label("No missions defined; runs globally.");
+        return;
+    }
+    ui.label(if selected.is_empty() {
+        "All missions (none explicitly selected)"
+    } else {
+        "Only selected missions"
+    });
+    ui.horizontal_wrapped(|ui| {
+        for mission in available {
+            let mut enabled = selected.contains(mission);
+            if ui.checkbox(&mut enabled, mission).changed() {
+                if enabled {
+                    selected.push(mission.clone());
+                } else {
+                    selected.retain(|selected| selected != mission);
+                }
+                *dirty = true;
+            }
+        }
+    });
+}
+
 fn edit_optional_bool(ui: &mut egui::Ui, label: &str, value: &mut Option<bool>) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
@@ -1664,6 +2040,7 @@ mod tests {
                 &source,
                 source.type_path.clone(),
                 "source".into(),
+                0,
                 BridgeSide::Regular,
             ),
         );
@@ -1673,6 +2050,7 @@ mod tests {
                 &target,
                 target.type_path.clone(),
                 "target".into(),
+                1,
                 BridgeSide::Regular,
             ),
         );
@@ -1725,12 +2103,14 @@ mod tests {
             &component,
             "Bridge".into(),
             "bridge".into(),
+            0,
             BridgeSide::Receive,
         );
         let transmit = UiNode::from_component(
             &component,
             "Bridge".into(),
             "bridge".into(),
+            0,
             BridgeSide::Transmit,
         );
         assert!(receive.inputs.is_empty());
@@ -1755,6 +2135,7 @@ mod tests {
         let receive = UiNode {
             component_type: "Bridge".into(),
             model_id: "can".into(),
+            model_index: 0,
             kind: ComponentKind::Bridge,
             side: BridgeSide::Receive,
             inputs: Vec::new(),

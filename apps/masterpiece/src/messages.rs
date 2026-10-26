@@ -14,6 +14,7 @@ pub enum SuperState {
     Idle,
     Intaking,
     Outtaking,
+    SpinningUp,
     Shooting,
     WalkAndTalk, //A nickname for the state where the robot intakes and shoots at the same time.
 }

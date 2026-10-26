@@ -20,6 +20,41 @@ masterpiece-sim:
 
   cargo run -p masterpiece --features=sim-debug --bin masterpiece-sim
 
+# Run the PC mission against the CAN-connected robot with its live digital twin.
+masterpiece-pc:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  cargo build -p evods
+  cargo build -p masterpiece --features=pc,sim-debug \
+    --bin masterpiece-pc --bin masterpiece-twin
+
+  PIDS=()
+  cleanup() {
+    for pid in "${PIDS[@]}"; do
+      pkill -TERM -P "$pid" 2>/dev/null || true
+    done
+    for pid in "${PIDS[@]}"; do
+      kill "$pid" 2>/dev/null || true
+    done
+    for pid in "${PIDS[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  }
+  trap cleanup EXIT INT TERM
+
+  zenohd &
+  PIDS+=("$!")
+
+  target/debug/evods &
+  PIDS+=("$!")
+
+  LIVE_ARCHIVE="apps/masterpiece/logs/masterpiece_pc_live_$(date +%Y%m%d_%H%M%S).copper"
+  target/debug/masterpiece-twin 127.0.0.1:9000 "$LIVE_ARCHIVE" &
+  PIDS+=("$!")
+
+  target/debug/masterpiece-pc
+
 # Render the execution DAG from the app config.
 rcfg:
   #!/usr/bin/env bash

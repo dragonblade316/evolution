@@ -1,4 +1,8 @@
 (
+    missions: [
+        (id: "default"),
+        (id: "pc"),
+    ],
     tasks: [
         (
         id: "joytodrive",
@@ -24,52 +28,27 @@
         id: "camera",
         type: "cu_v4l::V4l",
         kind: source,
+        config: { "buffers": 4, "device": 0, "fourcc": "GREY", "height": 720, "timeout_ms": 500, "width": 1280, },
         run_in_sim: false,
-        config: {
-            "device": 0,
-            "width": 1280,
-            "height": 720,
-            "fourcc": "GREY",
-            "buffers": 4,
-            "timeout_ms": 500,
-        },
+        missions: ["default"],
+    ),
+        (
+        id: "null_camera",
+        type: "tasks::NullCameraSource",
+        kind: source,
+        missions: ["pc"],
     ),
         (
         id: "apriltag_detector",
         type: "cu_apriltag::AprilTags",
         kind: task,
-        config: {
-            "family": "tag16h5",
-            "bits_corrected": 1,
-            "tag_size": 0.0,
-            "fx": 1077.5364936413373,
-            "fy": 1077.7948707218447,
-            "cx": 605.5026981265167,
-            "cy": 399.29058993159094,
-        },
+        config: { "bits_corrected": 1, "cx": 605.5026981265167, "cy": 399.29058993159094, "family": "tag16h5", "fx": 1077.5364936413373, "fy": 1077.7948707218447, "tag_size": 0.0, },
     ),
         (
         id: "apriltag_pose",
         type: "apriltag_tasks::AprilTagPoseProcessor",
         kind: task,
-        config: {
-            "tags": [
-                {
-                    "id": 0,
-                    "field_pose": {
-                        "translation_m": [0.0, 0.0, 0.0],
-                        "rotation_radians": [0.0, 0.0, 0.0],
-                    },
-                },
-            ],
-            "robot_to_camera_pose": {
-                "translation_m": [0.0, 0.0, 0.0],
-                "rotation_radians": [0.0, 0.0, 0.0],
-            },
-            "min_decision_margin": 0.0,
-            "ground_z_m": 0.0,
-            "max_ground_distance_m": 0.25,
-        },
+        config: { "ground_z_m": 0.0, "max_ground_distance_m": 0.25, "min_decision_margin": 0.0, "robot_to_camera_pose": {"rotation_radians":[0.0,0.0,0.0],"translation_m":[0.0,0.0,0.0]}, "tags": [{"field_pose":{"rotation_radians":[0.0,0.0,0.0],"translation_m":[0.0,0.0,0.0]},"id":0}], },
     ),
         (
         id: "poselog",
@@ -107,6 +86,7 @@
         id: "turret_check",
         type: "turret_tasks::TurretCheck",
         kind: task,
+        config: { "angle_tol": 10.0, "velocity_tol": 1000.0, },
     ),
         (
         id: "turret_angle_solver",
@@ -132,35 +112,25 @@
         id: "s1_intake_state_machine",
         type: "tasks::IntakeStateMachine::S1IntakeStateMachine",
         kind: task,
+        config: { "intake_speed": 750.0, },
     ),
         (
         id: "binary_servo",
         type: "rpsinks::BinaryServo",
         kind: sink,
+        missions: ["default"],
     ),
         (
         id: "muzzle_velocity_turret_state_assembler",
         type: "turret_tasks::MuzzleVelocityTurretStateAssembler",
         kind: task,
+        config: { "flywheel_radius": 0.0508, "flywheel_speed_multiplier": 8.0, },
     ),
-    (
+        (
         id: "alliance_transform_selector",
         type: "allience_spesific_tasks::AllianceTransformSelector",
         kind: task,
-        config: {
-            "red_transform": [
-                [1.0, 0.0, 0.0, 2.365],
-                [0.0, 1.0, 0.0, 2.319],
-                [0.0, 0.0, 1.0, 0.551],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-            "blue_transform": [
-                [1.0, 0.0, 0.0, 0.035],
-                [0.0, 1.0, 0.0, 0.081],
-                [0.0, 0.0, 1.0, 0.551],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
-        },
+        config: { "blue_transform": [[1.0,0.0,0.0,0.035],[0.0,1.0,0.0,0.081],[0.0,0.0,1.0,0.551],[0.0,0.0,0.0,1.0]], "red_transform": [[1.0,0.0,0.0,2.365],[0.0,1.0,0.0,2.319],[0.0,0.0,1.0,0.551],[0.0,0.0,0.0,1.0]], },
     ),
         (
         id: "moteus_data_splitter",
@@ -172,9 +142,7 @@
         (
         id: "evo_ds_bridge",
         type: "bridges::EvoDsBridge",
-        config: {
-            "wire_format": "json",
-        },
+        config: { "wire_format": "json", },
         channels: [
             Tx(
             id: "telemetry",
@@ -189,49 +157,59 @@
         (
         id: "moteus",
         type: "bridges::UziMoteusBridge",
-        run_in_sim: false,
         channels: [
             Tx(
             id: "drive_left",
             route: "moteus/drive_left/cmd",
+            config: { "can_id": "1", },
         ),
             Tx(
             id: "drive_right",
             route: "moteus/drive_right/cmd",
+            config: { "can_id": "2", },
         ),
             Tx(
             id: "indexer",
             route: "moteus/indexer/cmd",
+            config: { "can_id": "3", },
         ),
             Tx(
             id: "turret",
             route: "moteus/turret/cmd",
+            config: { "can_id": "4", },
         ),
             Tx(
             id: "shooter",
             route: "moteus/shooter/cmd",
+            config: { "can_id": "5", },
         ),
             Rx(
             id: "drive_left_data",
             route: "moteus/drive_left/data",
+            config: { "can_id": "1", },
         ),
             Rx(
             id: "drive_right_data",
             route: "moteus/drive_right/data",
+            config: { "can_id": "2", },
         ),
             Rx(
             id: "indexer_data",
             route: "moteus/indexer/data",
+            config: { "can_id": "3", },
         ),
             Rx(
             id: "turret_data",
             route: "moteus/turret/data",
+            config: { "can_id": "4", },
         ),
             Rx(
             id: "shooter_data",
             route: "moteus/shooter/data",
+            config: { "can_id": "5", },
         ),
         ],
+        run_in_sim: false,
     ),
     ],
     cnx: [
@@ -259,6 +237,13 @@
         src: "camera",
         dst: "apriltag_detector",
         msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
+        missions: ["default"],
+    ),
+        (
+        src: "null_camera",
+        dst: "apriltag_detector",
+        msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
+        missions: ["pc"],
     ),
         (
         src: "apriltag_detector",
@@ -366,18 +351,8 @@
         msg: "moteus_bridge :: messages :: MoteusData",
     ),
         (
-        src: "moteus/shooter_data",
-        dst: "moteus_turret_state_assembler",
-        msg: "moteus_bridge :: messages :: MoteusData",
-    ),
-        (
         src: "moteus/turret_data",
         dst: "moteus_data_splitter",
-        msg: "moteus_bridge :: messages :: MoteusData",
-    ),
-        (
-        src: "moteus/turret_data",
-        dst: "moteus_turret_state_assembler",
         msg: "moteus_bridge :: messages :: MoteusData",
     ),
         (
@@ -399,16 +374,13 @@
         src: "s1_intake_state_machine",
         dst: "binary_servo",
         msg: "bool",
+        missions: ["default"],
     ),
         (
-        src: "turret_c_m_d",
-        dst: "moteus/shooter",
-        msg: "crate::tasks::TurretCmd::FlywheelMotorCmd",
-    ),
-        (
-        src: "turret_c_m_d",
-        dst: "moteus/turret",
-        msg: "crate::tasks::TurretCmd::AngleMotorCmd",
+        src: "s1_intake_state_machine",
+        dst: "__nc__",
+        msg: "bool",
+        missions: ["pc"],
     ),
         (
         src: "moteus_data_splitter",
@@ -419,6 +391,21 @@
         src: "moteus_data_splitter",
         dst: "turret_angle_solver",
         msg: "moteus_tasks::MoteusPosition",
+    ),
+        (
+        src: "s_o_t_m",
+        dst: "turret_angle_solver",
+        msg: "sotm_rt::TurretAngle",
+    ),
+        (
+        src: "s_o_t_m",
+        dst: "muzzle_velocity_turret_state_assembler",
+        msg: "sotm_rt::MuzzleVelocity",
+    ),
+        (
+        src: "turret_angle_solver",
+        dst: "muzzle_velocity_turret_state_assembler",
+        msg: "cu29::units::si::f32::Angle",
     ),
         (
         src: "moteus_data_splitter",
@@ -451,19 +438,24 @@
         msg: "moteus_tasks::MoteusFault",
     ),
         (
-        src: "s_o_t_m",
-        dst: "turret_angle_solver",
-        msg: "sotm_rt::TurretAngle",
+        src: "moteus/shooter_data",
+        dst: "moteus_turret_state_assembler",
+        msg: "moteus_bridge :: messages :: MoteusData",
     ),
         (
-        src: "s_o_t_m",
-        dst: "muzzle_velocity_turret_state_assembler",
-        msg: "sotm_rt::MuzzleVelocity",
+        src: "moteus/turret_data",
+        dst: "moteus_turret_state_assembler",
+        msg: "moteus_bridge :: messages :: MoteusData",
     ),
         (
-        src: "turret_angle_solver",
-        dst: "muzzle_velocity_turret_state_assembler",
-        msg: "cu29::units::si::f32::Angle",
+        src: "turret_c_m_d",
+        dst: "moteus/shooter",
+        msg: "crate::tasks::TurretCmd::FlywheelMotorCmd",
+    ),
+        (
+        src: "turret_c_m_d",
+        dst: "moteus/turret",
+        msg: "crate::tasks::TurretCmd::AngleMotorCmd",
     ),
     ],
     monitor: (

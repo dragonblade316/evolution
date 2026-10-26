@@ -19,7 +19,7 @@ use cu29::{
 use moteus::command::PositionCommand;
 use moteus::transport::Router;
 use moteus::transport::singleton::get_singleton_transport;
-use moteus::{BlockingController};
+use moteus::{BlockingController, Mode};
 
 #[derive(Debug)]
 struct MoteusMotor {
@@ -107,6 +107,8 @@ struct MoteusChannelConfig<Id: Copy> {
     motor: MoteusMotor,
     /// Present only for TX channels.
     tx_cmd: TxCommandConfig,
+    last_fault: i8,
+    last_mode: Option<Mode>,
 }
 
 #[derive(Reflect)]
@@ -233,6 +235,8 @@ where
                         ctrl: BlockingController::with_transport(can_id as u8, transport.clone()),
                     },
                     tx_cmd,
+                    last_fault: 0,
+                    last_mode: None,
                 })
             })
             .collect::<CuResult<Vec<_>>>()?;
@@ -255,6 +259,8 @@ where
                         ctrl: BlockingController::with_transport(can_id as u8, transport.clone()),
                     },
                     tx_cmd: TxCommandConfig::default(),
+                    last_fault: 0,
+                    last_mode: None,
                 })
             })
             .collect::<CuResult<Vec<_>>>()?;
@@ -282,10 +288,10 @@ where
 
         let cmd_msg: &CuMsg<MotorCMD> = msg.downcast_ref()?;
         if let Some(cmd) = cmd_msg.payload() {
-            debug!(
-                "moteus send can_id={}: {:?}",
-                channel_config.can_id, cmd
-            );
+            // debug!(
+            //     "moteus send can_id={}: {:?}",
+            //     channel_config.can_id, cmd
+            // );
             let cmd = match cmd {
                 MotorCMD::Position(pos, vel, torque) => Self::cmd(Some(*pos), *vel, *torque),
                 MotorCMD::Velocity(vel, torque) => Self::cmd(None, Some(*vel), *torque),
@@ -298,15 +304,19 @@ where
                 }
             };
             let cmd = channel_config.tx_cmd.apply(cmd);
-            debug!("moteus position_cmd can_id={}", channel_config.can_id);
-            let _ = channel_config.motor.ctrl.set_position(cmd);
+            // debug!("moteus position_cmd can_id={}", channel_config.can_id);
+            channel_config
+                .motor
+                .ctrl
+                .set_position_no_query(&cmd)
+                .map_err(|error| CuError::new_with_cause("Moteus position command failed", error))?;
         }
         Ok(())
     }
 
     fn receive<'a, Payload>(
         &mut self,
-        _ctx: &CuContext,
+        ctx: &CuContext,
         channel: &'static BridgeChannel<<Self::Rx as BridgeChannelSet>::Id, Payload>,
         msg: &mut CuMsg<Payload>,
     ) -> CuResult<()>
@@ -325,6 +335,27 @@ where
             .ctrl
             .query()
             .map_err(|e| CuError::new_with_cause("Moteus query failed", e))?;
+
+        if channel_config.last_mode != Some(result.mode) {
+            let mode = result.mode.to_string();
+            info!(
+                ctx,
+                "Moteus CAN ID {} mode changed to {}",
+                can_id,
+                mode
+            );
+            channel_config.last_mode = Some(result.mode);
+        }
+
+        if result.fault != 0 && result.fault != channel_config.last_fault {
+            error!(
+                ctx,
+                "Moteus fault detected on CAN ID {}: fault code {}",
+                can_id,
+                result.fault
+            );
+        }
+        channel_config.last_fault = result.fault;
 
         msg.downcast_mut()?.set_payload(messages::MoteusData {
             canid: can_id,

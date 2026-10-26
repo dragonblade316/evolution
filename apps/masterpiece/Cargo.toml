@@ -10,6 +10,11 @@ name = "masterpiece"
 path = "src/main.rs"
 
 [[bin]]
+name = "masterpiece-pc"
+path = "src/pc.rs"
+required-features = ["pc"]
+
+[[bin]]
 name = "masterpiece-sim"
 path = "src/sim.rs"
 required-features = ["sim-debug"]
@@ -38,6 +43,7 @@ required-features = ["evoviz-logreader"]
 default = []
 logreader = ["dep:cu29-export"]
 evoviz-logreader = ["logreader", "dep:evoviz_test"]
+pc = ["cu29/logstream"]
 sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug", "dep:cuviz", "dep:ctrlc"]
 
 [dependencies]

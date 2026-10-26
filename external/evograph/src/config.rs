@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -11,7 +11,8 @@ use thiserror::Error;
 use crate::indexer::ComponentCatalog;
 use crate::model::{
     ComponentKind, ConstantDefinition, EditableConfig, GraphDocument, GraphEdge, GraphNode,
-    MonitorInstance, NumericStorage, PortDescriptor, PortDirection, NC_ENDPOINT, normalize_type,
+    MonitorInstance, NumericStorage, PortDescriptor, PortDirection, UnconnectedOutput, NC_ENDPOINT,
+    normalize_type,
 };
 use crate::project::atomic_write;
 
@@ -40,11 +41,34 @@ pub struct ConfigFile {
     pub original_hash: [u8; 32],
     pub document: GraphDocument,
     original_document: GraphDocument,
+    fragment: bool,
 }
 
 impl ConfigFile {
     pub fn load(path: impl AsRef<Path>, catalog: &ComponentCatalog) -> Result<Self, ConfigError> {
-        let path = path.as_ref().to_path_buf();
+        Self::load_internal(path.as_ref(), catalog, false, &mut Vec::new())
+    }
+
+    pub fn load_fragment(
+        path: impl AsRef<Path>,
+        catalog: &ComponentCatalog,
+    ) -> Result<Self, ConfigError> {
+        Self::load_internal(path.as_ref(), catalog, true, &mut Vec::new())
+    }
+
+    fn load_internal(
+        path: &Path,
+        catalog: &ComponentCatalog,
+        fragment: bool,
+        stack: &mut Vec<PathBuf>,
+    ) -> Result<Self, ConfigError> {
+        let path = path.to_path_buf();
+        if stack.contains(&path) {
+            return Err(ConfigError::Parse(format!(
+                "circular include through {}",
+                path.display()
+            )));
+        }
         let source = if path.exists() {
             fs::read_to_string(&path).map_err(|source| ConfigError::Read {
                 path: path.clone(),
@@ -56,7 +80,9 @@ impl ConfigFile {
         let parsed: RawRoot = copper_ron_options()
             .from_str(&source)
             .map_err(|error| ConfigError::Parse(error.to_string()))?;
-        let original_document = build_document(parsed, &source, catalog)?;
+        stack.push(path.clone());
+        let original_document = build_document(parsed, &source, &path, catalog, stack)?;
+        stack.pop();
         let mut document = original_document.clone();
         normalize_document_connection_order(&mut document);
         Ok(Self {
@@ -65,7 +91,39 @@ impl ConfigFile {
             original_source: source,
             original_document,
             document,
+            fragment,
         })
+    }
+
+    pub fn add_import(
+        &mut self,
+        include_path: String,
+        catalog: &ComponentCatalog,
+    ) -> Result<(), ConfigError> {
+        let path = self
+            .path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(&include_path);
+        let child = Self::load_fragment(path, catalog)?;
+        let (inputs, outputs) = boundary_ports(&child.document);
+        self.document.nodes.push(GraphNode {
+            id: include_path.clone(),
+            component_type: include_path,
+            kind: ComponentKind::Import,
+            inputs,
+            outputs,
+            config: EditableConfig::default(),
+            channels: Vec::new(),
+            background: None,
+            run_in_sim: None,
+            logging_enabled: None,
+            missions: Vec::new(),
+            pending_workspace_dependency: None,
+            unresolved: false,
+            extra_fields: BTreeMap::new(),
+        });
+        Ok(())
     }
 
     pub fn disk_changed(&self) -> bool {
@@ -91,8 +149,17 @@ impl ConfigFile {
             replacements.push(("tasks", render_tasks(&self.document)));
             replacements.push(("bridges", render_bridges(&self.document)));
         }
-        if nodes_changed || self.document.edges != self.original_document.edges {
-            replacements.push(("cnx", render_connections(&self.document)));
+        if nodes_changed
+            || self.document.edges != self.original_document.edges
+            || self.document.unconnected_outputs != self.original_document.unconnected_outputs
+        {
+            replacements.push(("cnx", render_connections(&self.document, self.fragment)));
+        }
+        if self.document.missions != self.original_document.missions {
+            replacements.push(("missions", render_missions(&self.document)));
+        }
+        if nodes_changed {
+            replacements.push(("includes", render_includes(&self.document)));
         }
         if self.document.constants != self.original_document.constants {
             replacements.push(("constants", render_constants(&self.document)));
@@ -173,6 +240,10 @@ struct RawRoot {
     monitor: Option<RawMonitor>,
     #[serde(default)]
     monitors: Vec<RawMonitor>,
+    #[serde(default)]
+    missions: Vec<RawMission>,
+    #[serde(default)]
+    includes: Vec<RawInclude>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,6 +258,8 @@ struct RawTask {
     background: Option<bool>,
     run_in_sim: Option<bool>,
     logging: Option<RawLogging>,
+    #[serde(default)]
+    missions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -213,6 +286,8 @@ struct RawBridge {
     #[serde(default)]
     channels: Vec<RawBridgeChannel>,
     run_in_sim: Option<bool>,
+    #[serde(default)]
+    missions: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,6 +311,22 @@ struct RawConnection {
     src: String,
     dst: String,
     msg: String,
+    #[serde(default)]
+    missions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawMission {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawInclude {
+    path: String,
+    #[serde(default)]
+    params: BTreeMap<String, Value>,
+    #[serde(default)]
+    missions: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,20 +340,30 @@ struct RawMonitor {
 fn build_document(
     raw: RawRoot,
     source: &str,
+    path: &Path,
     catalog: &ComponentCatalog,
+    stack: &mut Vec<PathBuf>,
 ) -> Result<GraphDocument, ConfigError> {
-    let mut document = GraphDocument::default();
+    let mut document = GraphDocument {
+        missions: raw.missions.iter().map(|mission| mission.id.clone()).collect(),
+        ..GraphDocument::default()
+    };
     let task_extras = section_extras(
         source,
         "tasks",
-        &["id", "type", "kind", "config", "background", "run_in_sim", "logging"],
+        &[
+            "id", "type", "kind", "config", "background", "run_in_sim", "logging", "missions",
+        ],
     );
     let bridge_extras = section_extras(
         source,
         "bridges",
-        &["id", "type", "config", "channels", "run_in_sim"],
+        &[
+            "id", "type", "config", "channels", "run_in_sim", "missions",
+        ],
     );
-    let connection_extras = section_extras(source, "cnx", &["src", "dst", "msg"]);
+    let connection_extras = section_extras(source, "cnx", &["src", "dst", "msg", "missions"]);
+    let include_extras = section_extras(source, "includes", &["path", "params", "missions"]);
     for (task_index, task) in raw.tasks.into_iter().enumerate() {
         let type_path = task.type_.unwrap_or_default();
         let descriptor = catalog.find(&type_path);
@@ -286,6 +387,7 @@ fn build_document(
             background: task.background,
             run_in_sim: task.run_in_sim,
             logging_enabled: task.logging.and_then(|logging| logging.enabled),
+            missions: task.missions,
             pending_workspace_dependency: None,
             unresolved: descriptor.is_none(),
             extra_fields: task_extras.get(task_index).cloned().unwrap_or_default(),
@@ -305,6 +407,7 @@ fn build_document(
                 background: None,
                 run_in_sim: bridge.run_in_sim,
                 logging_enabled: None,
+                missions: bridge.missions.clone(),
                 pending_workspace_dependency: None,
                 unresolved: true,
                 extra_fields: BTreeMap::new(),
@@ -313,6 +416,7 @@ fn build_document(
         );
         node.config = values_to_config(bridge.config);
         node.run_in_sim = bridge.run_in_sim;
+        node.missions = bridge.missions;
         node.extra_fields = bridge_extras
             .get(bridge_index)
             .cloned()
@@ -359,57 +463,92 @@ fn build_document(
         document.nodes.push(node);
     }
 
-    let node_by_id: HashMap<String, usize> = document
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.id.clone(), index))
-        .collect();
+    for (include_index, include) in raw.includes.into_iter().enumerate() {
+        let include_path = path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(&include.path);
+        let (inputs, outputs, unresolved) =
+            match ConfigFile::load_internal(&include_path, catalog, true, stack) {
+                Ok(config) => {
+                    let (inputs, outputs) = boundary_ports(&config.document);
+                    (inputs, outputs, false)
+                }
+                Err(_) => (Vec::new(), Vec::new(), true),
+            };
+        document.nodes.push(GraphNode {
+            id: include.path.clone(),
+            component_type: include.path,
+            kind: ComponentKind::Import,
+            inputs,
+            outputs,
+            config: values_to_config(include.params),
+            channels: Vec::new(),
+            background: None,
+            run_in_sim: None,
+            logging_enabled: None,
+            missions: include.missions,
+            pending_workspace_dependency: None,
+            unresolved,
+            extra_fields: include_extras
+                .get(include_index)
+                .cloned()
+                .unwrap_or_default(),
+        });
+    }
+
     for (connection_index, connection) in raw.cnx.into_iter().enumerate() {
         let canonical_message = catalog.canonical_type(&connection.msg);
-        let (source_id, source_channel) = split_endpoint(&connection.src);
-        let Some(&source) = node_by_id.get(source_id) else {
-            continue;
-        };
-        let source_port = ensure_port(
-            &mut document.nodes[source],
+        let Some((source, source_port)) = resolve_endpoint(
+            &mut document,
             PortDirection::Output,
-            source_channel,
+            &connection.src,
             &connection.msg,
             &canonical_message,
+            &connection.missions,
             &[],
-        );
-        if connection.dst == NC_ENDPOINT {
-            continue;
-        }
-        let (target_id, target_channel) = split_endpoint(&connection.dst);
-        let Some(&target) = node_by_id.get(target_id) else {
+        ) else {
             continue;
         };
+        let extras = connection_extras
+            .get(connection_index)
+            .cloned()
+            .unwrap_or_default();
+        if connection.dst == NC_ENDPOINT {
+            document.unconnected_outputs.push(UnconnectedOutput {
+                source,
+                source_port,
+                message_type: connection.msg,
+                missions: connection.missions,
+                extra_fields: extras,
+            });
+            continue;
+        }
         let occupied_inputs = document
             .edges
             .iter()
-            .filter(|edge| edge.target == target)
-            .map(|edge| edge.target_port)
+            .filter(|edge| missions_overlap(&edge.missions, &connection.missions))
+            .map(|edge| (edge.target, edge.target_port))
             .collect::<Vec<_>>();
-        let target_port = ensure_port(
-            &mut document.nodes[target],
+        let Some((target, target_port)) = resolve_endpoint(
+            &mut document,
             PortDirection::Input,
-            target_channel,
+            &connection.dst,
             &connection.msg,
             &canonical_message,
+            &connection.missions,
             &occupied_inputs,
-        );
+        ) else {
+            continue;
+        };
         document.edges.push(GraphEdge {
             source,
             source_port,
             target,
             target_port,
             message_type: connection.msg,
-            extra_fields: connection_extras
-                .get(connection_index)
-                .cloned()
-                .unwrap_or_default(),
+            missions: connection.missions,
+            extra_fields: extras,
         });
     }
     for node in &mut document.nodes {
@@ -433,6 +572,119 @@ fn build_document(
         .collect();
     document.constants = parse_constants(source);
     Ok(document)
+}
+
+fn resolve_endpoint(
+    document: &mut GraphDocument,
+    direction: PortDirection,
+    endpoint: &str,
+    message: &str,
+    canonical_message: &str,
+    missions: &[String],
+    unavailable: &[(usize, usize)],
+) -> Option<(usize, usize)> {
+    let (node_id, channel) = split_endpoint(endpoint);
+    let candidates = document
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| {
+            node.kind != ComponentKind::Import
+                && node.id == node_id
+                && missions_overlap(&node.missions, missions)
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if let Some(node_index) = candidates.into_iter().find(|index| {
+        let ports = if direction == PortDirection::Input {
+            &document.nodes[*index].inputs
+        } else {
+            &document.nodes[*index].outputs
+        };
+        channel.is_some_and(|channel| ports.iter().any(|port| port.name == channel))
+            || ports.iter().any(|port| {
+                normalize_type(&port.serialized_type) == normalize_type(message)
+            })
+            || ports.iter().any(|port| {
+                normalize_type(&port.canonical_type) == normalize_type(canonical_message)
+            })
+    }) {
+        let unavailable_ports = unavailable
+            .iter()
+            .filter_map(|(node, port)| (*node == node_index).then_some(*port))
+            .collect::<Vec<_>>();
+        let port = ensure_port(
+            &mut document.nodes[node_index],
+            direction,
+            channel,
+            message,
+            canonical_message,
+            &unavailable_ports,
+        );
+        return Some((node_index, port));
+    }
+
+    document.nodes.iter().enumerate().find_map(|(node_index, node)| {
+        if node.kind != ComponentKind::Import || !missions_overlap(&node.missions, missions) {
+            return None;
+        }
+        let ports = if direction == PortDirection::Input {
+            &node.inputs
+        } else {
+            &node.outputs
+        };
+        ports.iter().enumerate().find_map(|(port_index, port)| {
+            (port.name == endpoint
+                && !unavailable.contains(&(node_index, port_index))
+                && (normalize_type(&port.serialized_type) == normalize_type(message)
+                    || normalize_type(&port.canonical_type)
+                        == normalize_type(canonical_message)))
+            .then_some((node_index, port_index))
+        })
+    })
+}
+
+fn missions_overlap(left: &[String], right: &[String]) -> bool {
+    left.is_empty()
+        || right.is_empty()
+        || left.iter().any(|mission| right.contains(mission))
+}
+
+fn boundary_ports(document: &GraphDocument) -> (Vec<PortDescriptor>, Vec<PortDescriptor>) {
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for (node_index, node) in document.nodes.iter().enumerate() {
+        for (port_index, port) in node.inputs.iter().enumerate() {
+            if document
+                .edges
+                .iter()
+                .any(|edge| edge.target == node_index && edge.target_port == port_index)
+            {
+                continue;
+            }
+            let mut port = port.clone();
+            port.ordinal = inputs.len();
+            port.name = endpoint_for(node, PortDirection::Input, port_index);
+            inputs.push(port);
+        }
+        for (port_index, port) in node.outputs.iter().enumerate() {
+            if document
+                .edges
+                .iter()
+                .any(|edge| edge.source == node_index && edge.source_port == port_index)
+                || document.unconnected_outputs.iter().any(|output| {
+                    output.source == node_index && output.source_port == port_index
+                })
+            {
+                continue;
+            }
+            let mut port = port.clone();
+            port.ordinal = outputs.len();
+            port.name = endpoint_for(node, PortDirection::Output, port_index);
+            outputs.push(port);
+        }
+    }
+    (inputs, outputs)
 }
 
 fn ensure_port(
@@ -459,17 +711,18 @@ fn ensure_port(
         }
         return index;
     }
-    let normalized_message = normalize_type(canonical_message);
+    let serialized_message = normalize_type(message);
     if let Some(index) = ports.iter().enumerate().find_map(|(index, port)| {
         (!unavailable.contains(&index)
-            && normalize_type(&port.serialized_type) == normalized_message)
+            && normalize_type(&port.serialized_type) == serialized_message)
             .then_some(index)
     }) {
         return index;
     }
+    let canonical_message = normalize_type(canonical_message);
     if let Some(index) = ports.iter().enumerate().find_map(|(index, port)| {
         (!unavailable.contains(&index)
-            && normalize_type(&port.canonical_type) == normalized_message)
+            && normalize_type(&port.canonical_type) == canonical_message)
             .then_some(index)
     }) {
         return index;
@@ -586,7 +839,7 @@ fn render_tasks(document: &GraphDocument) -> String {
     let tasks: Vec<_> = document
         .nodes
         .iter()
-        .filter(|node| node.kind != ComponentKind::Bridge)
+        .filter(|node| !matches!(node.kind, ComponentKind::Bridge | ComponentKind::Import))
         .map(|node| {
             let mut fields = vec![
                 format!("id: {},", ron_string(&node.id)),
@@ -607,6 +860,7 @@ fn render_tasks(document: &GraphDocument) -> String {
             if let Some(enabled) = node.logging_enabled {
                 fields.push(format!("logging: (enabled: {enabled}),"));
             }
+            append_missions(&mut fields, &node.missions);
             append_extra(&mut fields, &node.extra_fields);
             render_struct(&fields, 2)
         })
@@ -651,6 +905,7 @@ fn render_bridges(document: &GraphDocument) -> String {
             if let Some(run_in_sim) = node.run_in_sim {
                 fields.push(format!("run_in_sim: {run_in_sim},"));
             }
+            append_missions(&mut fields, &node.missions);
             append_extra(&mut fields, &node.extra_fields);
             render_struct(&fields, 2)
         })
@@ -740,7 +995,7 @@ fn normalize_document_connection_order(document: &mut GraphDocument) {
     document.edges = edges;
 }
 
-fn render_connections(document: &GraphDocument) -> String {
+fn render_connections(document: &GraphDocument, fragment: bool) -> String {
     let mut connections = Vec::new();
     for edge in &document.edges {
         let Some(source) = document.nodes.get(edge.source) else { continue };
@@ -752,6 +1007,7 @@ fn render_connections(document: &GraphDocument) -> String {
             format!("dst: {},", ron_string(&dst)),
             format!("msg: {},", ron_string(&edge.message_type)),
         ];
+        append_missions(&mut fields, &edge.missions);
         append_extra(&mut fields, &edge.extra_fields);
         connections.push((
             ConnectionOrderKey {
@@ -762,34 +1018,58 @@ fn render_connections(document: &GraphDocument) -> String {
             render_struct(&fields, 2),
         ));
     }
-    for (node_index, node) in document.nodes.iter().enumerate() {
-        if node.kind == ComponentKind::Bridge {
-            continue;
-        }
-        for output_index in 0..node.outputs.len() {
-            if document
-                .edges
-                .iter()
-                .any(|edge| edge.source == node_index && edge.source_port == output_index)
-            {
+    for output in &document.unconnected_outputs {
+        let Some(source) = document.nodes.get(output.source) else { continue };
+        let src = endpoint_for(source, PortDirection::Output, output.source_port);
+        let mut fields = vec![
+            format!("src: {},", ron_string(&src)),
+            format!("dst: {},", ron_string(NC_ENDPOINT)),
+            format!("msg: {},", ron_string(&output.message_type)),
+        ];
+        append_missions(&mut fields, &output.missions);
+        append_extra(&mut fields, &output.extra_fields);
+        connections.push((
+            ConnectionOrderKey {
+                source: output.source,
+                source_port: output.source_port,
+                target: None,
+            },
+            render_struct(&fields, 2),
+        ));
+    }
+    if !fragment {
+        for (node_index, node) in document.nodes.iter().enumerate() {
+            if matches!(node.kind, ComponentKind::Bridge | ComponentKind::Import) {
                 continue;
             }
-            let output = &node.outputs[output_index];
-            connections.push((
-                ConnectionOrderKey {
-                    source: node_index,
-                    source_port: output_index,
-                    target: None,
-                },
-                render_struct(
-                    &[
-                        format!("src: {},", ron_string(&node.id)),
-                        format!("dst: {},", ron_string(NC_ENDPOINT)),
-                        format!("msg: {},", ron_string(&output.serialized_type)),
-                    ],
-                    2,
-                ),
-            ));
+            for output_index in 0..node.outputs.len() {
+                if document
+                    .edges
+                    .iter()
+                    .any(|edge| edge.source == node_index && edge.source_port == output_index)
+                    || document.unconnected_outputs.iter().any(|output| {
+                        output.source == node_index && output.source_port == output_index
+                    })
+                {
+                    continue;
+                }
+                let output = &node.outputs[output_index];
+                connections.push((
+                    ConnectionOrderKey {
+                        source: node_index,
+                        source_port: output_index,
+                        target: None,
+                    },
+                    render_struct(
+                        &[
+                            format!("src: {},", ron_string(&node.id)),
+                            format!("dst: {},", ron_string(NC_ENDPOINT)),
+                            format!("msg: {},", ron_string(&output.serialized_type)),
+                        ],
+                        2,
+                    ),
+                ));
+            }
         }
     }
     let keys = connections.iter().map(|(key, _)| *key).collect::<Vec<_>>();
@@ -802,6 +1082,17 @@ fn render_connections(document: &GraphDocument) -> String {
 }
 
 fn endpoint_for(node: &GraphNode, direction: PortDirection, port: usize) -> String {
+    if node.kind == ComponentKind::Import {
+        let ports = if direction == PortDirection::Input {
+            &node.inputs
+        } else {
+            &node.outputs
+        };
+        return ports
+            .get(port)
+            .map(|port| port.name.clone())
+            .unwrap_or_else(|| node.id.clone());
+    }
     if node.kind != ComponentKind::Bridge {
         return node.id.clone();
     }
@@ -860,6 +1151,35 @@ fn render_constants(document: &GraphDocument) -> String {
     render_list(&values, 1)
 }
 
+fn render_missions(document: &GraphDocument) -> String {
+    render_list(
+        &document
+            .missions
+            .iter()
+            .map(|mission| render_struct(&[format!("id: {},", ron_string(mission))], 2))
+            .collect::<Vec<_>>(),
+        1,
+    )
+}
+
+fn render_includes(document: &GraphDocument) -> String {
+    let includes = document
+        .nodes
+        .iter()
+        .filter(|node| node.kind == ComponentKind::Import)
+        .map(|node| {
+            let mut fields = vec![format!("path: {},", ron_string(&node.component_type))];
+            if !node.config.0.is_empty() {
+                fields.push(format!("params: {},", render_config(&node.config)));
+            }
+            append_missions(&mut fields, &node.missions);
+            append_extra(&mut fields, &node.extra_fields);
+            render_struct(&fields, 2)
+        })
+        .collect::<Vec<_>>();
+    render_list(&includes, 1)
+}
+
 fn render_monitors(document: &GraphDocument) -> String {
     render_list(
         &document.monitors.iter().map(render_monitor).collect::<Vec<_>>(),
@@ -888,11 +1208,22 @@ fn render_config(config: &EditableConfig) -> String {
     format!("{{ {fields} }}")
 }
 
+fn append_missions(fields: &mut Vec<String>, missions: &[String]) {
+    if !missions.is_empty() {
+        let missions = missions
+            .iter()
+            .map(|mission| ron_string(mission))
+            .collect::<Vec<_>>()
+            .join(", ");
+        fields.push(format!("missions: [{missions}],"));
+    }
+}
+
 fn append_extra(fields: &mut Vec<String>, extra: &BTreeMap<String, String>) {
     for (key, value) in extra {
         if !matches!(
             key.as_str(),
-            "id" | "type" | "kind" | "config" | "background" | "run_in_sim" | "logging" | "channels"
+            "id" | "type" | "kind" | "config" | "background" | "run_in_sim" | "logging" | "channels" | "missions" | "path" | "params"
         ) {
             fields.push(format!("{key}: {value},"));
         }
@@ -924,6 +1255,8 @@ fn should_insert(name: &str, document: &GraphDocument) -> bool {
         "bridges" => document.nodes.iter().any(|node| node.kind == ComponentKind::Bridge),
         "constants" => !document.constants.is_empty(),
         "monitor" | "monitors" => !document.monitors.is_empty(),
+        "missions" => !document.missions.is_empty(),
+        "includes" => document.nodes.iter().any(|node| node.kind == ComponentKind::Import),
         _ => false,
     }
 }
@@ -1220,6 +1553,7 @@ mod tests {
                     target: 1,
                     target_port: 1,
                     message_type: "B".into(),
+                    missions: Vec::new(),
                     extra_fields: BTreeMap::new(),
                 },
                 GraphEdge {
@@ -1228,6 +1562,7 @@ mod tests {
                     target: 1,
                     target_port: 0,
                     message_type: "A".into(),
+                    missions: Vec::new(),
                     extra_fields: BTreeMap::new(),
                 },
             ],
@@ -1265,6 +1600,7 @@ mod tests {
             background: None,
             run_in_sim: None,
             logging_enabled: None,
+            missions: Vec::new(),
             pending_workspace_dependency: None,
             unresolved: false,
             extra_fields: BTreeMap::new(),
@@ -1280,6 +1616,53 @@ mod tests {
         );
         assert_eq!(port, 0);
         assert_eq!(node.inputs.len(), 1);
+    }
+
+    #[test]
+    fn exact_alias_selects_the_correct_same_type_port() {
+        let mut node = GraphNode {
+            id: "motors".into(),
+            component_type: "MotorTask".into(),
+            kind: ComponentKind::Task,
+            inputs: Vec::new(),
+            outputs: vec![
+                PortDescriptor {
+                    name: "LeftMotorCmd".into(),
+                    direction: PortDirection::Output,
+                    ordinal: 0,
+                    declared_type: "LeftMotorCmd".into(),
+                    serialized_type: "drive::LeftMotorCmd".into(),
+                    canonical_type: "common::MotorCmd".into(),
+                },
+                PortDescriptor {
+                    name: "RightMotorCmd".into(),
+                    direction: PortDirection::Output,
+                    ordinal: 1,
+                    declared_type: "RightMotorCmd".into(),
+                    serialized_type: "drive::RightMotorCmd".into(),
+                    canonical_type: "common::MotorCmd".into(),
+                },
+            ],
+            config: EditableConfig::default(),
+            channels: Vec::new(),
+            background: None,
+            run_in_sim: None,
+            logging_enabled: None,
+            missions: Vec::new(),
+            pending_workspace_dependency: None,
+            unresolved: false,
+            extra_fields: BTreeMap::new(),
+        };
+
+        let port = ensure_port(
+            &mut node,
+            PortDirection::Output,
+            None,
+            "drive::RightMotorCmd",
+            "common::MotorCmd",
+            &[],
+        );
+        assert_eq!(port, 1);
     }
 
     #[test]
@@ -1348,6 +1731,88 @@ mod tests {
         config.document.nodes[0].run_in_sim = Some(false);
         let rendered = config.rendered().unwrap();
         assert!(rendered.contains("priority: 7"));
+    }
+
+    #[test]
+    fn includes_expose_unconnected_child_ports() {
+        let temp = tempfile::tempdir().unwrap();
+        let child = temp.path().join("config/child.ron");
+        fs::create_dir_all(child.parent().unwrap()).unwrap();
+        fs::write(
+            &child,
+            r#"(
+                tasks: [
+                    (id: "child_source", type: "Source", kind: source),
+                    (id: "child_sink", type: "Sink", kind: sink),
+                ],
+                cnx: [],
+            )"#,
+        )
+        .unwrap();
+        let root = temp.path().join("copperconfig.ron");
+        fs::write(
+            &root,
+            r#"(
+                tasks: [
+                    (id: "root_source", type: "Source", kind: source),
+                    (id: "root_sink", type: "Sink", kind: sink),
+                ],
+                cnx: [
+                    (src: "root_source", dst: "child_sink", msg: "Payload"),
+                    (src: "child_source", dst: "root_sink", msg: "Payload"),
+                ],
+                includes: [(path: "config/child.ron")],
+            )"#,
+        )
+        .unwrap();
+        let port = |direction| PortDescriptor {
+            name: "Payload".into(),
+            direction,
+            ordinal: 0,
+            declared_type: "Payload".into(),
+            serialized_type: "Payload".into(),
+            canonical_type: "Payload".into(),
+        };
+        let mut catalog = ComponentCatalog::default();
+        catalog.components.push(crate::model::ComponentDescriptor {
+            type_path: "Source".into(),
+            display_name: "Source".into(),
+            package: "fixture".into(),
+            kind: ComponentKind::Source,
+            inputs: Vec::new(),
+            outputs: vec![port(PortDirection::Output)],
+            channels: Vec::new(),
+            config_hints: Vec::new(),
+            workspace_only: false,
+            source_path: None,
+        });
+        catalog.components.push(crate::model::ComponentDescriptor {
+            type_path: "Sink".into(),
+            display_name: "Sink".into(),
+            package: "fixture".into(),
+            kind: ComponentKind::Sink,
+            inputs: vec![port(PortDirection::Input)],
+            outputs: Vec::new(),
+            channels: Vec::new(),
+            config_hints: Vec::new(),
+            workspace_only: false,
+            source_path: None,
+        });
+
+        let config = ConfigFile::load(&root, &catalog).unwrap();
+        let import = config
+            .document
+            .nodes
+            .iter()
+            .find(|node| node.kind == ComponentKind::Import)
+            .unwrap();
+        assert_eq!(import.inputs[0].name, "child_sink");
+        assert_eq!(import.outputs[0].name, "child_source");
+        assert_eq!(config.document.edges.len(), 2);
+
+        let mut fragment = ConfigFile::load_fragment(&child, &catalog).unwrap();
+        fragment.document.nodes[0].run_in_sim = Some(true);
+        assert!(!fragment.rendered().unwrap().contains("__nc__"));
     }
 
     #[test]

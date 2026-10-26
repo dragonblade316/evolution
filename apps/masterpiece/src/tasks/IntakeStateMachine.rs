@@ -10,6 +10,7 @@ use crate::{messages::SuperState};
 enum IntakeState {
     IDLE,
     PASS,
+    HOLD,
     RETRACT,
     INTAKING,
     OUTTAKING
@@ -97,9 +98,19 @@ impl CuTask for S1IntakeStateMachine {
                     output.1.set_payload(false);
                     match cmd {
                         SuperState::Shooting | SuperState::WalkAndTalk => {},
+                        SuperState::SpinningUp => self.state = IntakeState::HOLD,
                         _ => self.retract(ctx),
                     }
                 },
+                IntakeState::HOLD => {
+                    output.0.set_payload(stopcmd);
+                    output.1.set_payload(false);
+                    match cmd {
+                        SuperState::SpinningUp => {},
+                        SuperState::Shooting | SuperState::WalkAndTalk => self.state = IntakeState::PASS,
+                        _ => self.retract(ctx),
+                    }
+                }
                 IntakeState::OUTTAKING => {
                     output.0.set_payload(revcmd);
                     output.1.set_payload(true);

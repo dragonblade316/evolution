@@ -140,7 +140,7 @@ fn main() {
             MasterpieceSimStep::MoteusRxTurretData { channel, msg } => {
                 let motor = sim_turret_angle.borrow();
                 msg.set_payload(MoteusData {
-                    canid: 3,
+                    canid: 4,
                     data: MotorData {
                         pos: motor.pos(),
                         vel: motor.speed(),
@@ -173,7 +173,7 @@ fn main() {
             MasterpieceSimStep::MoteusRxShooterData { channel, msg } => {
                 let motor = sim_shooter.borrow();
                 msg.set_payload(MoteusData {
-                    canid: 4,
+                    canid: 5,
                     data: MotorData {
                         pos: motor.pos(),
                         vel: motor.speed(),

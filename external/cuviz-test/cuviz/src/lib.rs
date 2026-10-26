@@ -141,6 +141,9 @@ where
         while !stop.load(Ordering::Relaxed) {
             frames.wait_timeout(Duration::from_millis(20));
             self.drain_twin::<A>(&mut frames, &mut logs)?;
+            if frames.is_closed() {
+                break;
+            }
         }
 
         let status = twin.stop()?;

@@ -11,6 +11,7 @@ pub enum ComponentKind {
     Sink,
     Bridge,
     Monitor,
+    Import,
     Unresolved,
 }
 
@@ -22,6 +23,7 @@ impl ComponentKind {
             Self::Sink => "Sink",
             Self::Bridge => "Bridge",
             Self::Monitor => "Monitor",
+            Self::Import => "Import",
             Self::Unresolved => "Unresolved",
         }
     }
@@ -106,6 +108,7 @@ pub struct GraphNode {
     pub background: Option<bool>,
     pub run_in_sim: Option<bool>,
     pub logging_enabled: Option<bool>,
+    pub missions: Vec<String>,
     pub pending_workspace_dependency: Option<String>,
     pub unresolved: bool,
     pub extra_fields: BTreeMap<String, String>,
@@ -134,6 +137,7 @@ impl GraphNode {
             background: None,
             run_in_sim: None,
             logging_enabled: None,
+            missions: Vec::new(),
             pending_workspace_dependency: component
                 .workspace_only
                 .then(|| component.package.clone()),
@@ -150,6 +154,16 @@ pub struct GraphEdge {
     pub target: usize,
     pub target_port: usize,
     pub message_type: String,
+    pub missions: Vec<String>,
+    pub extra_fields: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnconnectedOutput {
+    pub source: usize,
+    pub source_port: usize,
+    pub message_type: String,
+    pub missions: Vec<String>,
     pub extra_fields: BTreeMap<String, String>,
 }
 
@@ -254,8 +268,10 @@ impl ConstantDefinition {
 pub struct GraphDocument {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+    pub unconnected_outputs: Vec<UnconnectedOutput>,
     pub monitors: Vec<MonitorInstance>,
     pub constants: Vec<ConstantDefinition>,
+    pub missions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,20 +306,29 @@ impl Diagnostic {
 impl GraphDocument {
     pub fn diagnostics(&self) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        let mut ids = HashSet::new();
+        let mut ids: HashMap<&str, Vec<&[String]>> = HashMap::new();
         for node in &self.nodes {
             if node.id.is_empty() {
                 diagnostics.push(Diagnostic::error("Node IDs cannot be empty"));
-            } else if node.id == NC_ENDPOINT || node.id.contains('/') {
+            } else if node.kind != ComponentKind::Import
+                && (node.id == NC_ENDPOINT || node.id.contains('/'))
+            {
                 diagnostics.push(Diagnostic::error(format!(
                     "Node '{}' uses a reserved endpoint character or name",
                     node.id
                 )));
-            } else if !ids.insert(node.id.as_str()) {
-                diagnostics.push(Diagnostic::error(format!(
-                    "Node ID '{}' is duplicated",
-                    node.id
-                )));
+            } else {
+                let duplicates = ids.entry(node.id.as_str()).or_default();
+                if duplicates
+                    .iter()
+                    .any(|missions| missions_overlap(missions, &node.missions))
+                {
+                    diagnostics.push(Diagnostic::error(format!(
+                        "Node ID '{}' is duplicated in the same mission",
+                        node.id
+                    )));
+                }
+                duplicates.push(&node.missions);
             }
             if node.unresolved {
                 diagnostics.push(Diagnostic::warning(format!(
@@ -318,6 +343,18 @@ impl GraphDocument {
                     &channel.config,
                     &mut diagnostics,
                 );
+            }
+        }
+
+        let mut mission_ids = HashSet::new();
+        for mission in &self.missions {
+            if mission.is_empty() {
+                diagnostics.push(Diagnostic::error("Mission IDs cannot be empty"));
+            } else if !mission_ids.insert(mission) {
+                diagnostics.push(Diagnostic::error(format!(
+                    "Mission '{}' is duplicated",
+                    mission
+                )));
             }
         }
 
@@ -373,12 +410,18 @@ impl GraphDocument {
                     input.declared_type,
                 )));
             }
-            if !connected_inputs.insert((edge.target, edge.target_port)) {
+            if self.edges.iter().any(|other| {
+                !std::ptr::eq(other, edge)
+                    && other.target == edge.target
+                    && other.target_port == edge.target_port
+                    && missions_overlap(&other.missions, &edge.missions)
+            }) {
                 diagnostics.push(Diagnostic::error(format!(
-                    "Input '{}' on '{}' has more than one producer",
+                    "Input '{}' on '{}' has more than one producer in the same mission",
                     input.name, target.id
                 )));
             }
+            connected_inputs.insert((edge.target, edge.target_port));
         }
 
         for (node_index, node) in self.nodes.iter().enumerate() {
@@ -484,6 +527,7 @@ impl GraphDocument {
             target,
             target_port,
             message_type: output.serialized_type.clone(),
+            missions: Vec::new(),
             extra_fields: BTreeMap::new(),
         };
         self.edges.push(candidate);
@@ -504,6 +548,12 @@ impl GraphDocument {
         }
         unreachable!()
     }
+}
+
+fn missions_overlap(left: &[String], right: &[String]) -> bool {
+    left.is_empty()
+        || right.is_empty()
+        || left.iter().any(|mission| right.contains(mission))
 }
 
 fn validate_config_values(owner: &str, config: &EditableConfig, diagnostics: &mut Vec<Diagnostic>) {
@@ -577,6 +627,7 @@ mod tests {
             background: None,
             run_in_sim: None,
             logging_enabled: None,
+            missions: Vec::new(),
             pending_workspace_dependency: None,
             unresolved: false,
             extra_fields: BTreeMap::new(),
@@ -622,6 +673,7 @@ mod tests {
                     background: None,
                     run_in_sim: None,
                     logging_enabled: None,
+                    missions: Vec::new(),
                     pending_workspace_dependency: None,
                     unresolved: false,
                     extra_fields: BTreeMap::new(),
@@ -644,6 +696,7 @@ mod tests {
                     background: None,
                     run_in_sim: None,
                     logging_enabled: None,
+                    missions: Vec::new(),
                     pending_workspace_dependency: None,
                     unresolved: false,
                     extra_fields: BTreeMap::new(),
@@ -655,6 +708,7 @@ mod tests {
                 target: 1,
                 target_port: 0,
                 message_type: "Angle".into(),
+                missions: Vec::new(),
                 extra_fields: BTreeMap::new(),
             }],
             ..GraphDocument::default()

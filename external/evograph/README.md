@@ -12,11 +12,18 @@ You can also launch it without a path and use **Open folder…**. Right-click th
 add an indexed task or bridge, drag between ports to connect them, and use the inspector to edit
 node IDs and free-form RON configuration. The `egui-snarl` canvas supports drag-to-pan and
 scroll-wheel zoom without relaying out or resizing nodes as the camera scale changes.
-Constants and monitors have separate tabs. `Ctrl/Cmd+S` saves.
+Missions, constants, and monitors have separate tabs. Mission membership can be set on tasks,
+bridges, connections, and imports; leaving every mission unchecked makes that item global.
+`Ctrl/Cmd+S` saves.
 
 Each bridge appears as two canvas nodes backed by one bridge configuration: **RX** is the
 source-side node for messages received from the bridge, while **TX** is the sink-side node for
 messages sent to it. Selecting, editing, or deleting either side operates on that single bridge.
+
+Copper include files can be created or added from the toolbar and are kept under the application's
+`config` folder. Each include is a graph node whose ports are the child graph's unconnected inputs
+and outputs. Use **Open graph** on an include node to edit that file and **Back** to return to its
+parent.
 
 Canvas positions and the current pan/zoom camera are persisted next to the app manifest in
 `.evonode`. This sidecar is updated after moving, adding, renaming, or deleting nodes and after

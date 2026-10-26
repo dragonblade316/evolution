@@ -205,10 +205,11 @@ impl CuTask for TurretStateAssembler {
 /// Assembles a turret state from a muzzle velocity and a turret position.
 ///
 /// The muzzle velocity is converted to flywheel angular velocity with
-/// `omega = muzzle_velocity / flywheel_radius`.
+/// `omega = muzzle_velocity / flywheel_radius * flywheel_speed_multiplier`.
 #[derive(Reflect)]
 pub struct MuzzleVelocityTurretStateAssembler {
     flywheel_radius: Length,
+    flywheel_speed_multiplier: f32,
 }
 
 type MuzzleVelocity = Velocity;
@@ -220,10 +221,12 @@ impl MuzzleVelocityTurretStateAssembler {
         muzzle_velocity: MuzzleVelocity,
         turret_position: TurretPosition,
         flywheel_radius: Length,
+        flywheel_speed_multiplier: f32,
     ) -> common::TurretState {
         common::TurretState {
             flywheel: AngularVelocity::new::<radian_per_second>(
-                muzzle_velocity.get::<meter_per_second>() / flywheel_radius.get::<meter>(),
+                muzzle_velocity.get::<meter_per_second>() / flywheel_radius.get::<meter>()
+                    * flywheel_speed_multiplier,
             ),
             position: turret_position,
         }
@@ -243,12 +246,19 @@ impl CuTask for MuzzleVelocityTurretStateAssembler {
         Self: Sized,
     {
         const DEFAULT_FLYWHEEL_RADIUS_M: f32 = 0.05;
+        const DEFAULT_FLYWHEEL_SPEED_MULTIPLIER: f32 = 1.0;
 
-        let flywheel_radius_m = match config {
-            Some(cfg) => cfg
-                .get::<f32>("flywheel_radius")?
-                .unwrap_or(DEFAULT_FLYWHEEL_RADIUS_M),
-            None => DEFAULT_FLYWHEEL_RADIUS_M,
+        let (flywheel_radius_m, flywheel_speed_multiplier) = match config {
+            Some(cfg) => (
+                cfg.get::<f32>("flywheel_radius")?
+                    .unwrap_or(DEFAULT_FLYWHEEL_RADIUS_M),
+                cfg.get::<f32>("flywheel_speed_multiplier")?
+                    .unwrap_or(DEFAULT_FLYWHEEL_SPEED_MULTIPLIER),
+            ),
+            None => (
+                DEFAULT_FLYWHEEL_RADIUS_M,
+                DEFAULT_FLYWHEEL_SPEED_MULTIPLIER,
+            ),
         };
         if flywheel_radius_m <= 0.0 {
             return Err(CuError::from("flywheel_radius must be greater than zero"));
@@ -256,6 +266,7 @@ impl CuTask for MuzzleVelocityTurretStateAssembler {
 
         Ok(Self {
             flywheel_radius: Length::new::<meter>(flywheel_radius_m),
+            flywheel_speed_multiplier,
         })
     }
 
@@ -276,6 +287,7 @@ impl CuTask for MuzzleVelocityTurretStateAssembler {
             *muzzle_velocity,
             *turret_position,
             self.flywheel_radius,
+            self.flywheel_speed_multiplier,
         ));
         Ok(())
     }

@@ -1,0 +1,56 @@
+Copper panic
+time_unix_ms: 1792799848735
+thread: main
+location: components/tasks/sotm_rt/src/lib.rs:116:72
+message: called `Option::unwrap()` on a `None` value
+crash_report: /home/dragonblade316/Projects/Evolution-Robotics/evolution/copper-crash-1792799848735-1908295.txt
+
+Backtrace:
+   0: <cu29_runtime::monitoring::PanicReport>::capture
+             at /home/dragonblade316/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cu29-runtime-1.2.1/src/monitoring.rs:847:24
+   1: cu29_runtime::monitoring::ensure_runtime_panic_hook_installed::{closure#0}::{closure#0}
+             at /home/dragonblade316/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cu29-runtime-1.2.1/src/monitoring.rs:946:30
+   2: std::panicking::panic_with_hook
+   3: std::panicking::panic_handler::{closure#0}
+   4: std::sys::backtrace::__rust_end_short_backtrace::<std::panicking::panic_handler::{closure#0}, !>
+   5: __rustc::rust_begin_unwind
+   6: core::panicking::panic_fmt
+   7: core::panicking::panic
+   8: core::option::unwrap_failed
+   9: <core::option::Option<[f64; 2]>>::unwrap
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/option.rs:1013:21
+  10: <sotm_rt::SOTM>::solve
+             at ./components/tasks/sotm_rt/src/lib.rs:116:72
+  11: <sotm_rt::SOTM as cu29_runtime::cutask::CuTask>::process
+             at ./components/tasks/sotm_rt/src/lib.rs:221:47
+  12: <masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run_one_iteration
+             at ./apps/masterpiece/src/pc.rs:22:1
+  13: <masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run::{closure#2}
+             at ./apps/masterpiece/src/pc.rs:22:1
+  14: <<masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run::{closure#2} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:250:5
+  15: <core::panic::unwind_safe::AssertUnwindSafe<<masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run::{closure#2}> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/panic/unwind_safe.rs:275:9
+  16: std::panicking::catch_unwind::do_call::<core::panic::unwind_safe::AssertUnwindSafe<<masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run::{closure#2}>, core::result::Result<(), cu29_traits::CuError>>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:581:40
+  17: std::panicking::catch_unwind::<core::result::Result<(), cu29_traits::CuError>, core::panic::unwind_safe::AssertUnwindSafe<<masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run::{closure#2}>>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panicking.rs:544:19
+  18: std::panic::catch_unwind::<core::panic::unwind_safe::AssertUnwindSafe<<masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run::{closure#2}>, core::result::Result<(), cu29_traits::CuError>>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/panic.rs:359:14
+  19: <masterpiece_pc::pc::MasterpieceApplication as cu29_runtime::app::CuApplication<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite>>::run
+             at ./apps/masterpiece/src/pc.rs:22:1
+  20: <cu29_runtime::app::CuAppLifecycle<cu29_unifiedlog::memmap::MmapSectionStorage, cu29_unifiedlog::memmap::MmapUnifiedLoggerWrite, masterpiece_pc::pc::MasterpieceApplication>>::run_until_shutdown
+             at /home/dragonblade316/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cu29-runtime-1.2.1/src/app.rs:530:24
+  21: masterpiece_pc::main
+             at ./apps/masterpiece/src/pc.rs:121:17
+  22: <fn() -> core::result::Result<(), cu29_traits::CuError> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/ops/function.rs:250:5
+  23: std::sys::backtrace::__rust_begin_short_backtrace::<fn() -> core::result::Result<(), cu29_traits::CuError>, core::result::Result<(), cu29_traits::CuError>>
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/sys/backtrace.rs:166:18
+  24: std::rt::lang_start::<core::result::Result<(), cu29_traits::CuError>>::{closure#0}
+             at /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/std/src/rt.rs:206:18
+  25: std::rt::lang_start_internal
+  26: main
+  27: __libc_start_call_main
+  28: __libc_start_main@@GLIBC_2.34
+  29: _start

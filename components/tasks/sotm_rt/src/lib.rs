@@ -70,9 +70,12 @@ impl SOTM {
                 return DVector::from_vec(vec![1e6, 1e6, 1e6]);
             }
 
-            let sol = Ivp::second_order(&Ball {}, 0.0, tof, &q0, &v0).solve().unwrap();
-
-            let y = sol.y.last().unwrap();
+            let Ok(sol) = Ivp::second_order(&Ball {}, 0.0, tof, &q0, &v0).solve() else {
+                return DVector::from_vec(vec![1e6, 1e6, 1e6]);
+            };
+            let Some(y) = sol.y.last() else {
+                return DVector::from_vec(vec![1e6, 1e6, 1e6]);
+            };
             let qx = y[0];
             let qy = y[1];
 
@@ -106,20 +109,27 @@ impl SOTM {
     ///v_perpendicular: Turret velocity across the goal axis (lateral).
     ///heading: Robot yaw in world frame (radians).
     ///goal_direction: Angle from turret to goal in world frame (radians).
-    ///Returns: (turret_angle, muzzle_velocity)
-    fn solve(dist_to_goal: f64, dz: f64, v_parallel: f64, v_perpendicular: f64, heading: f64, goal_direction: f64) -> (f64, f64) {
+    ///Returns: Some((turret_angle, muzzle_velocity)) when both range solves converge.
+    fn solve(
+        dist_to_goal: f64,
+        dz: f64,
+        v_parallel: f64,
+        v_perpendicular: f64,
+        heading: f64,
+        goal_direction: f64,
+    ) -> Option<(f64, f64)> {
         // `heading` is the world angle of robot-local +X. Robot-forward and
         // turret zero are local +Y, which is another 90 degrees CCW.
         let angle_front_to_goal = goal_direction - heading - FRAC_PI_2;
 
         let qt = [dist_to_goal, dz];
-        let [_velocity, tof] = Self::solve_range(qt, v_parallel, 60.0).unwrap();
+        let [_velocity, tof] = Self::solve_range(qt, v_parallel, 60.0)?;
         let (theta, r) = Self::solve_angle(v_perpendicular, dist_to_goal, tof);
         let qt = [r, dz];
-        let [velocity_out, _] = Self::solve_range(qt, v_parallel, 60.0).unwrap();
+        let [velocity_out, _] = Self::solve_range(qt, v_parallel, 60.0)?;
 
         let turret_angle = angle_front_to_goal + theta;
-        (turret_angle, velocity_out)
+        Some((turret_angle, velocity_out))
     }
 }
 
@@ -218,9 +228,11 @@ impl CuTask for SOTM {
         // Direction from turret to goal in world frame
         let goal_direction = f64::atan2(dy, dx);
 
-        let (turret_angle, muzzle_velocity) = Self::solve(
+        let Some((turret_angle, muzzle_velocity)) = Self::solve(
             dist_to_goal, dz, v_parallel, v_perpendicular, heading, goal_direction,
-        );
+        ) else {
+            return Ok(());
+        };
 
         // Wrap the f64 solver outputs into the typed SI unit exports expected
         // by the rest of the graph (`TurretAngle` matches the `Angle` consumed
@@ -232,7 +244,7 @@ impl CuTask for SOTM {
         muzzle_velocity_out
             .set_payload(MuzzleVelocity::new::<meter_per_second>(muzzle_velocity as f32));
 
-        debug!("turret_angle_out: {}", turret_angle);
+        // debug!("turret_angle_out: {}", turret_angle);
         Ok(())
     }
 }

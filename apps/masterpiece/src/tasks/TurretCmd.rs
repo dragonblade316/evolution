@@ -68,7 +68,7 @@ impl CuTask for TurretCMD {
                     output.0.set_payload(MotorCMD::Stop);
                     output.1.set_payload(MotorCMD::Stop);
                 },
-                SuperState::Shooting | SuperState::WalkAndTalk => {
+                SuperState::Shooting | SuperState::WalkAndTalk | SuperState::SpinningUp => {
                     output.0.set_payload(MotorCMD::Velocity(turretd.flywheel, None));
                     output.1.set_payload(MotorCMD::Position(turretd.position, self.max_turret_velocity, None));
                 }

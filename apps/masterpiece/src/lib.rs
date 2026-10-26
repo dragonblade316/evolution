@@ -76,6 +76,12 @@ pub use default::{
 };
 
 #[cfg(feature = "sim-debug")]
+pub use pc::{
+    CuStampedDataSet as MasterpiecePcDataSet,
+    MasterpieceSimulation as MasterpiecePcRuntime,
+};
+
+#[cfg(feature = "sim-debug")]
 pub struct MasterpieceVisualizer {
     rerun: rerun::RecordingStream,
 }
@@ -105,19 +111,100 @@ impl MasterpieceVisualizer {
 }
 
 #[cfg(feature = "sim-debug")]
-impl cuviz::Visualizer<MasterpieceDataSet> for MasterpieceVisualizer {
-    fn visualize_copperlist(
-        &mut self,
-        copperlist: &CopperList<MasterpieceDataSet>,
-    ) -> CuResult<()> {
+trait MasterpieceVisualizationData: CopperListTuple + CuPayloadRawBytes {
+    fn pose(&self) -> Option<&cu_spatial_payloads::Pose<f64>>;
+    fn intake_command(&self) -> Option<&common::MotorCMD>;
+    fn turret_state(&self) -> Option<&common::TurretState>;
+    fn left_drive_command(&self) -> Option<&common::MotorCMD>;
+    fn right_drive_command(&self) -> Option<&common::MotorCMD>;
+}
+
+#[cfg(feature = "sim-debug")]
+impl MasterpieceVisualizationData for MasterpieceDataSet {
+    fn pose(&self) -> Option<&cu_spatial_payloads::Pose<f64>> {
+        self.get_pose_estimator_output_0().payload()
+    }
+
+    fn intake_command(&self) -> Option<&common::MotorCMD> {
+        self.get_s_1_intake_state_machine_output_0().payload()
+    }
+
+    fn turret_state(&self) -> Option<&common::TurretState> {
+        self.get_moteus_turret_state_assembler_output().payload()
+    }
+
+    fn left_drive_command(&self) -> Option<&common::MotorCMD> {
+        self.get_diffdrivecmd_output_0().payload()
+    }
+
+    fn right_drive_command(&self) -> Option<&common::MotorCMD> {
+        self.get_diffdrivecmd_output_1().payload()
+    }
+}
+
+#[cfg(feature = "sim-debug")]
+impl MasterpieceVisualizationData for MasterpiecePcDataSet {
+    fn pose(&self) -> Option<&cu_spatial_payloads::Pose<f64>> {
+        self.get_pose_estimator_output_0().payload()
+    }
+
+    fn intake_command(&self) -> Option<&common::MotorCMD> {
+        self.get_s_1_intake_state_machine_output_0().payload()
+    }
+
+    fn turret_state(&self) -> Option<&common::TurretState> {
+        self.get_moteus_turret_state_assembler_output().payload()
+    }
+
+    fn left_drive_command(&self) -> Option<&common::MotorCMD> {
+        self.get_diffdrivecmd_output_0().payload()
+    }
+
+    fn right_drive_command(&self) -> Option<&common::MotorCMD> {
+        self.get_diffdrivecmd_output_1().payload()
+    }
+}
+
+#[cfg(feature = "sim-debug")]
+impl<P> cuviz::Visualizer<P> for MasterpieceVisualizer
+where
+    P: MasterpieceVisualizationData + 'static,
+{
+    fn visualize_copperlist(&mut self, copperlist: &CopperList<P>) -> CuResult<()> {
         self.rerun
             .set_time_sequence("copperlist", copperlist.id as i64);
 
-        if let Some(pose) = copperlist
-            .msgs
-            .get_pose_estimator_output_0()
-            .payload()
+        if let Some(common::MotorCMD::Velocity(velocity, _)) =
+            copperlist.msgs.left_drive_command()
         {
+            self.rerun
+                .log(
+                    "diffdrive_cmd/left",
+                    &rerun::Scalars::single(
+                        velocity.get::<cu29::units::si::angular_velocity::radian_per_second>(),
+                    ),
+                )
+                .map_err(|error| {
+                    CuError::from(format!("failed to log left diff-drive command: {error}"))
+                })?;
+        }
+
+        if let Some(common::MotorCMD::Velocity(velocity, _)) =
+            copperlist.msgs.right_drive_command()
+        {
+            self.rerun
+                .log(
+                    "diffdrive_cmd/right",
+                    &rerun::Scalars::single(
+                        velocity.get::<cu29::units::si::angular_velocity::radian_per_second>(),
+                    ),
+                )
+                .map_err(|error| {
+                    CuError::from(format!("failed to log right diff-drive command: {error}"))
+                })?;
+        }
+
+        if let Some(pose) = copperlist.msgs.pose() {
             let matrix = pose.to_matrix();
             let yaw = f32::atan2(matrix[1][0] as f32, matrix[0][0] as f32);
             self.rerun
@@ -152,11 +239,7 @@ impl cuviz::Visualizer<MasterpieceDataSet> for MasterpieceVisualizer {
                 )
                 .map_err(|error| CuError::from(format!("failed to log robot heading: {error}")))?;
 
-            let intake_color = match copperlist
-                .msgs
-                .get_s_1_intake_state_machine_output_0()
-                .payload()
-            {
+            let intake_color = match copperlist.msgs.intake_command() {
                 Some(common::MotorCMD::Velocity(velocity, _)) if velocity.raw() > 0.0 => {
                     rerun::Color::from_rgb(0, 255, 0)
                 }
@@ -177,11 +260,7 @@ impl cuviz::Visualizer<MasterpieceDataSet> for MasterpieceVisualizer {
                 })?;
         }
 
-        if let Some(turret) = copperlist
-            .msgs
-            .get_moteus_turret_state_assembler_output()
-            .payload()
-        {
+        if let Some(turret) = copperlist.msgs.turret_state() {
             let yaw = turret.position.get::<cu29::units::si::angle::radian>()
                 + std::f32::consts::FRAC_PI_2;
             self.rerun
@@ -220,8 +299,16 @@ impl cuviz::Visualizer<MasterpieceDataSet> for MasterpieceVisualizer {
 #[cfg(feature = "sim-debug")]
 pub type MasterpieceEvoVisualizer =
     cuviz::EvoVisualizer<MasterpieceDataSet, MasterpieceVisualizer>;
+#[cfg(feature = "sim-debug")]
+pub type MasterpiecePcEvoVisualizer =
+    cuviz::EvoVisualizer<MasterpiecePcDataSet, MasterpieceVisualizer>;
 
 #[cfg(feature = "sim-debug")]
 pub fn evo_visualizer() -> CuResult<MasterpieceEvoVisualizer> {
+    Ok(cuviz::EvoVisualizer::new(MasterpieceVisualizer::spawn()?))
+}
+
+#[cfg(feature = "sim-debug")]
+pub fn evo_pc_visualizer() -> CuResult<MasterpiecePcEvoVisualizer> {
     Ok(cuviz::EvoVisualizer::new(MasterpieceVisualizer::spawn()?))
 }

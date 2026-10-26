@@ -43,19 +43,19 @@ impl CuTask for S1Behavior {
             let joy = input.1.payload().unwrap_or(&defaultgp);
             let ready_to_fire = input.2.payload().unwrap_or(&false);
 
-            debug!("ds: {}", ds);
-
             match ds {
 
                 DSStatus::ENABLED(t) => {
                     if joy.right_shoulder && joy.left_shoulder {
-                        if *ready_to_fire {
-                            output.set_payload(SuperState::WalkAndTalk);
-                            return Ok(());
-                        } else {
-                            output.set_payload(SuperState::Intaking);
-                            return Ok(())
-                        }
+                        output.set_payload(SuperState::WalkAndTalk);
+                        // if *ready_to_fire {
+                        //     output.set_payload(SuperState::WalkAndTalk);
+                        //     return Ok(());
+                        // } else {
+                        //     output.set_payload(SuperState::SpinningUp);
+                        //     return Ok(())
+                        // }
+                        return Ok(());
                     }
                     if joy.right_shoulder {
                         output.set_payload(SuperState::Intaking);
@@ -66,7 +66,7 @@ impl CuTask for S1Behavior {
                             output.set_payload(SuperState::Shooting);
                             return Ok(());
                         } else {
-                            output.set_payload(SuperState::Idle);
+                            output.set_payload(SuperState::SpinningUp);
                             return Ok(());
                         }
                     }

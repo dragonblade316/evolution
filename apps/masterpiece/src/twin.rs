@@ -1,6 +1,9 @@
 use cu29::logstream::{CuStreamRx, CuStreamRxError};
 use cu29::prelude::*;
-use masterpiece::{MasterpieceRuntime, evo_visualizer};
+#[cfg(not(feature = "pc"))]
+use masterpiece::{MasterpieceRuntime as TwinRuntime, evo_visualizer as twin_visualizer};
+#[cfg(feature = "pc")]
+use masterpiece::{MasterpiecePcRuntime as TwinRuntime, evo_pc_visualizer as twin_visualizer};
 use std::net::UdpSocket;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -62,7 +65,7 @@ fn main() -> CuResult<()> {
     .map_err(|error| CuError::new_with_cause("failed to install Ctrl-C handler", error))?;
 
     let receiver = UdpReceiver::bind(&bind_address)?;
-    let twin = MasterpieceRuntime::twin(receiver).with_log_path(archive);
-    evo_visualizer()?.run_twin(twin, log_index.as_deref(), stop.as_ref())?;
+    let twin = TwinRuntime::twin(receiver).with_log_path(archive);
+    twin_visualizer()?.run_twin(twin, log_index.as_deref(), stop.as_ref())?;
     Ok(())
 }
