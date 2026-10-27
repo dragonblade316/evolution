@@ -114,7 +114,11 @@ fn zruntime(
 
     runtime.block_on(async move {
         println!("[zruntime] runtime running");
-        let session = zenoh::open(zenoh::Config::default()).await.unwrap();
+        let mut config = zenoh::Config::default();
+        config
+            .insert_json5("connect/endpoints", r#"["tcp/evolution.local:7447"]"#)
+            .unwrap();
+        let session = zenoh::open(config).await.unwrap();
         let telsub = session.declare_subscriber("evods/tel/*").await.unwrap();
         let dspub = session.declare_publisher("evods/ds").await.unwrap();
         let ds_matching = dspub.matching_listener().await.unwrap();

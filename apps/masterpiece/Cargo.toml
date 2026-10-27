@@ -8,6 +8,7 @@ default-run = "masterpiece-sim"
 [[bin]]
 name = "masterpiece"
 path = "src/main.rs"
+required-features = ["logstream"]
 
 [[bin]]
 name = "masterpiece-pc"
@@ -40,15 +41,17 @@ path = "src/evoviz_logreader.rs"
 required-features = ["evoviz-logreader"]
 
 [features]
-default = []
+default = ["logstream"]
+logstream = ["cu29/logstream", "dep:cu29-logstream"]
 logreader = ["dep:cu29-export"]
 evoviz-logreader = ["logreader", "dep:evoviz_test"]
-pc = ["cu29/logstream"]
+pc = ["logstream"]
 sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug", "dep:cuviz", "dep:ctrlc"]
 
 [dependencies]
 cu29 = { workspace = true, features = ["reflect"] }
 cu29-export = { workspace = true, optional = true }
+cu29-logstream = { version = "1.2.1", optional = true }
 serde = { workspace = true }
 rapier2d = { workspace = true }
 glam = { workspace = true }

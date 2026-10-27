@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>motctl — moteus PID Tuning Console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="disconnected">
+  <main>
+    <header>
+      <h1>🚀 moteus PID Tuning Console</h1>
+      <div class="header-actions">
+        <span id="connection-state">Connecting…</span>
+        <button id="export">Export configs</button>
+      </div>
+    </header>
+
+    <section class="toolbar">
+      <button id="start" class="start">▶ Start All</button>
+      <button id="stop" class="stop">⏹ STOP ALL</button>
+      <strong id="run-state">STOPPED</strong>
+      <span id="motor-count">0 motors</span>
+      <span class="divider"></span>
+      <label>Add CAN ID: <input id="add-can-id" type="number" min="1" max="127" value="1"></label>
+      <button id="add-motor">➕ Add Motor</button>
+    </section>
+
+    <div id="notice"></div>
+    <section id="motors">
+      <p class="empty">No motors added. Use “Add Motor” above to connect to a controller.</p>
+    </section>
+
+    <footer>
+      <details>
+        <summary>ℹ About PID configuration</summary>
+        <p>Applying PID stops the motor, writes kp/ki/kd through the diagnostic stream, sets the position integral limit to 0.0, and persists the configuration to flash.</p>
+      </details>
+      <details>
+        <summary>ℹ About Velocity Mode</summary>
+        <p>Velocity mode sends position=NaN, the firmware sentinel for velocity-only tracking. kp provides disturbance rejection; kd provides velocity damping. The moteus uses a single integrated PID.</p>
+      </details>
+      <details>
+        <summary>ℹ Platform Notes</summary>
+        <p>The controller runs on the robot and communicates with this page over a WebSocket. Transport auto-discovery supports fdcanusb and Linux SocketCAN.</p>
+      </details>
+    </footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

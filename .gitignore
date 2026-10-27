@@ -1,4 +1,5 @@
 /target
+/result
 *.copper
 Cargo.lock
 /assets/**/assets

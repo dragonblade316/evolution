@@ -1,3 +1,5 @@
+#[cfg(feature = "logstream")]
+pub mod logstream;
 pub mod messages;
 pub mod tasks;
 

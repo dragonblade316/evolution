@@ -1,4 +1,16 @@
 (
+    constants: [
+        (
+            id: "TWIN_ADDRESS",
+            type: "&str",
+            expression: "\"192.168.12.189:9000\"",
+        ),
+        (
+            id: "TWIN_MAX_RECORD_BYTES",
+            storage: usize,
+            value: 2097152,
+        ),
+    ],
     missions: [
         (id: "default"),
         (id: "pc"),
@@ -28,7 +40,7 @@
         id: "camera",
         type: "cu_v4l::V4l",
         kind: source,
-        config: { "buffers": 4, "device": 0, "fourcc": "GREY", "height": 720, "timeout_ms": 500, "width": 1280, },
+        config: { "buffers": 4, "device": 0, "fourcc": "YUYV", "height": 720, "timeout_ms": 500, "width": 1280, },
         run_in_sim: false,
         missions: ["default"],
     ),

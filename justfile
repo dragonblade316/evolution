@@ -1,5 +1,38 @@
 # Workspace automation helpers.
 
+# Cross-compile one binary for the Raspberry Pi. Usage: just rpi-build proto proto
+rpi-build package binary:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  nix develop .#rpi --command bash -c '
+    set -euo pipefail
+    cargo build --release -p "{{package}}" --bin "{{binary}}"
+    install -Dm755 \
+      "target/aarch64-unknown-linux-gnu/release/{{binary}}" \
+      "target/rpi/{{binary}}"
+    patchelf --set-interpreter /lib/ld-linux-aarch64.so.1 --remove-rpath \
+      "target/rpi/{{binary}}"
+  '
+
+# Build and deploy a robot application. Usage: just deploy masterpiece
+deploy package binary="":
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  package="{{package}}"
+  binary="{{binary}}"
+  robot="${ROBOT_TARGET:-dragonblade316@evolution.local}"
+
+  [[ -n "$binary" ]] || binary="$package"
+
+  just rpi-build "$package" "$binary"
+  nix develop .#rpi --command rsync -ah --progress \
+    "target/rpi/$binary" \
+    "$robot:/opt/evolution/bin/.evolution.new"
+  nix develop .#rpi --command ssh "$robot" \
+    'chmod 0755 /opt/evolution/bin/.evolution.new && mv -f /opt/evolution/bin/.evolution.new /opt/evolution/bin/evolution && sudo "$(readlink -f /run/current-system/sw/bin/systemctl)" restart evolution.service'
+
 # Open a Copper app in Evograph. Usage: just evograph masterpiece
 evograph app:
   cargo run -p evograph -- "apps/{{app}}"
@@ -19,6 +52,15 @@ masterpiece-sim:
   trap cleanup EXIT INT TERM
 
   cargo run -p masterpiece --features=sim-debug --bin masterpiece-sim
+
+# Receive the robot's live Copper stream and run its digital twin.
+masterpiece-twin:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  LIVE_ARCHIVE="apps/masterpiece/logs/masterpiece_live_$(date +%Y%m%d_%H%M%S).copper"
+  cargo run -p masterpiece --features=sim-debug --bin masterpiece-twin -- \
+    0.0.0.0:9000 "$LIVE_ARCHIVE"
 
 # Run the PC mission against the CAN-connected robot with its live digital twin.
 masterpiece-pc:
@@ -50,7 +92,7 @@ masterpiece-pc:
   PIDS+=("$!")
 
   LIVE_ARCHIVE="apps/masterpiece/logs/masterpiece_pc_live_$(date +%Y%m%d_%H%M%S).copper"
-  target/debug/masterpiece-twin 127.0.0.1:9000 "$LIVE_ARCHIVE" &
+  target/debug/masterpiece-twin 0.0.0.0:9000 "$LIVE_ARCHIVE" &
   PIDS+=("$!")
 
   target/debug/masterpiece-pc

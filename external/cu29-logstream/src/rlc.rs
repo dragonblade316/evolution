@@ -1,0 +1,1213 @@
+use crate::{
+    Error, FecScheme, FecSymbolKind, Lane, PACKET_HEADER_LEN, RecordKind, Result, WireHeader,
+    WirePacketRef, decode_record, encode_packet_into,
+};
+use alloc::{boxed::Box, vec, vec::Vec};
+use bincode::{Decode, Encode};
+use core::fmt::{Display, Formatter};
+use cu_fec::{
+    DensityThreshold, EncodingSymbolId, Field, RepairParameters, RepairPayloadId, RlcConfig,
+    RlcDecoder, RlcEncoder, SourcePayloadId, SourceStatus,
+};
+
+const FRAGMENT_MAGIC: [u8; 4] = *b"CUFR";
+pub(crate) const FRAGMENT_HEADER_LEN: usize = 20;
+
+/// Identity shared by one sender's continuous stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode)]
+pub struct StreamIdentity {
+    pub session_id: [u8; 16],
+    pub sender_id: u32,
+}
+
+/// Receiver-side bounds for one continuous stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReceiverLimits {
+    /// Largest accepted framed semantic record.
+    pub max_record_bytes: usize,
+    /// Maximum number of incomplete and completed-but-ordered records retained.
+    /// This must be at least the active RLC window size.
+    pub max_buffered_records: usize,
+}
+
+impl ReceiverLimits {
+    pub const fn new(max_record_bytes: usize, max_buffered_records: usize) -> Self {
+        Self {
+            max_record_bytes,
+            max_buffered_records,
+        }
+    }
+}
+
+/// Why a range of CopperLists can no longer be reconstructed exactly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GapReason {
+    /// One or more required source symbols aged out of the configured RLC window.
+    RlcWindowExpired,
+    /// History unavailable before a verified late-join boundary.
+    LateJoin,
+    /// Recovery advanced to a verified recovery point after an outage.
+    RecoveryPoint,
+    /// The caller finalized the session before the range could be recovered.
+    SessionEnded,
+}
+
+/// An inclusive range of unrecoverable CopperList identifiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CopperListGap {
+    /// First missing CopperList identifier, inclusive.
+    pub first_id: u64,
+    /// Last missing CopperList identifier, inclusive.
+    pub last_id: u64,
+    /// Condition that made this range definitive.
+    pub reason: GapReason,
+}
+
+/// Ordered output from a continuous receiver.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContinuousReceiveEvent<'a> {
+    /// One complete, digest-verified semantic record.
+    Record(&'a RecoveredRecord),
+    /// An inclusive CopperList range that can no longer be recovered.
+    Gap(CopperListGap),
+}
+
+/// Separates malformed stream input from a downstream consumer failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReceiveError<E> {
+    /// Packet, FEC, assembly, or semantic-record failure.
+    Stream(Error),
+    /// Failure returned by the supplied event consumer.
+    Consumer(E),
+}
+
+impl<E> From<Error> for ReceiveError<E> {
+    fn from(error: Error) -> Self {
+        Self::Stream(error)
+    }
+}
+
+impl<E: Display> Display for ReceiveError<E> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Stream(error) => write!(formatter, "log stream receive failed: {error}"),
+            Self::Consumer(error) => write!(formatter, "log stream consumer failed: {error}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E: core::fmt::Debug + Display> std::error::Error for ReceiveError<E> {}
+
+/// Current bounded receiver occupancy, exposed for monitoring and tests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReceiverOccupancy {
+    /// Source symbols marked as processed inside the active RLC window.
+    pub processed_symbols: usize,
+    /// Records awaiting one or more source symbols.
+    pub incomplete_records: usize,
+    /// Complete records waiting for an earlier record or definitive gap.
+    pub ready_records: usize,
+}
+
+/// Observed delivery and recovery behavior for one continuous stream.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ContinuousRecoveryStats {
+    pub datagrams_seen: usize,
+    pub valid_datagrams: usize,
+    pub invalid_datagrams: usize,
+    pub inconsistent_datagrams: usize,
+    pub duplicate_symbols: usize,
+    pub expired_datagrams: usize,
+    pub source_symbols_received: usize,
+    pub source_symbols_recovered: usize,
+    pub repair_symbols_received: usize,
+    pub innovative_repairs: usize,
+    pub redundant_repairs: usize,
+    pub records_recovered: usize,
+    pub records_emitted: usize,
+    pub records_expired: usize,
+    pub gaps_emitted: usize,
+    pub missing_copperlists: u64,
+    pub peak_buffered_records: usize,
+}
+
+impl ContinuousRecoveryStats {
+    /// Percentage of expected systematic symbols that did not arrive intact.
+    pub const fn destruction_basis_points(self, expected_source_symbols: usize) -> u16 {
+        if expected_source_symbols == 0 {
+            return 0;
+        }
+        let destroyed = expected_source_symbols.saturating_sub(self.source_symbols_received);
+        ((destroyed as u64 * 10_000) / expected_source_symbols as u64) as u16
+    }
+
+    /// Percentage of missing systematic symbols reconstructed by FEC.
+    pub const fn source_recovery_basis_points(self, expected_source_symbols: usize) -> u16 {
+        let missing = expected_source_symbols.saturating_sub(self.source_symbols_received);
+        if missing == 0 {
+            return 10_000;
+        }
+        let recovered = if self.source_symbols_recovered < missing {
+            self.source_symbols_recovered
+        } else {
+            missing
+        };
+        ((recovered as u64 * 10_000) / missing as u64) as u16
+    }
+
+    /// Percentage of expected semantic records reconstructed and digest-verified.
+    pub const fn semantic_recovery_basis_points(self, expected_records: usize) -> u16 {
+        if expected_records == 0 {
+            return 0;
+        }
+        let recovered = if self.records_recovered < expected_records {
+            self.records_recovered
+        } else {
+            expected_records
+        };
+        ((recovered as u64 * 10_000) / expected_records as u64) as u16
+    }
+}
+
+/// One fully assembled and digest-verified semantic record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecoveredRecord {
+    bytes: Vec<u8>,
+    kind: RecordKind,
+    object_id: u64,
+    digest: [u8; 32],
+    keyframe_id: Option<u64>,
+}
+
+impl RecoveredRecord {
+    pub(crate) fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
+        let decoded = decode_record(&bytes)?;
+        let keyframe_id = None;
+        Ok(Self {
+            kind: decoded.kind,
+            object_id: decoded.object_id,
+            digest: decoded.digest,
+            keyframe_id,
+            bytes,
+        })
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Borrows metadata verified on assembly; immutable records are never re-hashed.
+    pub fn decoded(&self) -> crate::DecodedRecord<'_> {
+        crate::DecodedRecord {
+            kind: self.kind,
+            object_id: self.object_id,
+            digest: self.digest,
+            payload: &self.bytes[crate::record::RECORD_HEADER_LEN..],
+        }
+    }
+
+    pub(crate) fn validate_keyframe(&mut self) -> Result<()> {
+        self.keyframe_id = Some(crate::recovery::keyframe_id(self.decoded().payload)?);
+        Ok(())
+    }
+
+    /// CopperList ID decoded without copying the serialized task state.
+    pub fn keyframe_id(&self) -> Option<u64> {
+        self.keyframe_id
+    }
+}
+
+/// Stateful RFC 8681 encoder for a continuous CopperList lane.
+///
+/// Record serialization, fragmentation, hashing, FEC, and packet allocation run
+/// on the semantic-output worker, never on Copper's real-time task path.
+pub struct ContinuousEncoder<const MAX_SYMBOL_SIZE: usize, const MAX_WINDOW_SYMBOLS: usize> {
+    identity: StreamIdentity,
+    lane: Lane,
+    max_record_bytes: usize,
+    fec: RlcEncoder<MAX_SYMBOL_SIZE, MAX_WINDOW_SYMBOLS>,
+}
+
+impl<const MAX_SYMBOL_SIZE: usize, const MAX_WINDOW_SYMBOLS: usize>
+    ContinuousEncoder<MAX_SYMBOL_SIZE, MAX_WINDOW_SYMBOLS>
+{
+    pub fn new(
+        identity: StreamIdentity,
+        lane: Lane,
+        config: RlcConfig,
+        max_record_bytes: usize,
+        initial_esi: EncodingSymbolId,
+    ) -> Result<Self> {
+        validate_config(config, max_record_bytes)?;
+        Ok(Self {
+            identity,
+            lane,
+            max_record_bytes,
+            fec: RlcEncoder::new(config, initial_esi)?,
+        })
+    }
+
+    pub const fn config(&self) -> RlcConfig {
+        self.fec.config()
+    }
+
+    /// Fragments and emits one already-framed CopperList record as systematic symbols.
+    pub fn push_record(&mut self, record: &[u8], output: &mut Vec<Vec<u8>>) -> Result<usize> {
+        let mut datagram = vec![0; PACKET_HEADER_LEN + self.config().symbol_size()];
+        self.push_record_with(record, &mut datagram, |packet| {
+            output.push(packet.to_vec());
+            Ok(())
+        })
+    }
+
+    /// Fragments a record and emits each systematic packet immediately from
+    /// reusable caller-owned storage.
+    pub fn push_record_with(
+        &mut self,
+        record: &[u8],
+        datagram: &mut [u8],
+        mut emit: impl FnMut(&[u8]) -> Result<()>,
+    ) -> Result<usize> {
+        self.push_record_inner(record, datagram, &mut emit, None)
+            .map(|(source_symbols, _)| source_symbols)
+    }
+
+    pub(crate) fn push_record_with_repairs(
+        &mut self,
+        record: &[u8],
+        datagram: &mut [u8],
+        emit: &mut impl FnMut(&[u8]) -> Result<()>,
+        repair_schedule: &mut RepairSchedule,
+    ) -> Result<(usize, usize)> {
+        self.push_record_inner(record, datagram, emit, Some(repair_schedule))
+    }
+
+    fn push_record_inner(
+        &mut self,
+        record: &[u8],
+        datagram: &mut [u8],
+        emit: &mut impl FnMut(&[u8]) -> Result<()>,
+        mut repair_schedule: Option<&mut RepairSchedule>,
+    ) -> Result<(usize, usize)> {
+        let decoded = decode_record(record)?;
+        if decoded.kind != RecordKind::CopperList {
+            return Err(Error::InconsistentObject);
+        }
+        if record.len() > self.max_record_bytes {
+            return Err(Error::ObjectTooLarge {
+                actual: record.len() as u64,
+                maximum: self.max_record_bytes as u64,
+            });
+        }
+        let record_len = u32::try_from(record.len())
+            .map_err(|_| Error::InvalidConfig("record length exceeds u32"))?;
+        let fragment_capacity = fragment_capacity(self.config())?;
+        let fragment_count = record.len().div_ceil(fragment_capacity);
+        let fragment_count = u32::try_from(fragment_count)
+            .map_err(|_| Error::InvalidConfig("fragment count exceeds u32"))?;
+        let mut symbol = [0_u8; MAX_SYMBOL_SIZE];
+        let mut repair_symbols = 0usize;
+
+        for (fragment_index, chunk) in record.chunks(fragment_capacity).enumerate() {
+            let active_symbol = &mut symbol[..self.config().symbol_size()];
+            active_symbol.fill(0);
+            encode_fragment_header(
+                active_symbol,
+                decoded.object_id,
+                record_len,
+                fragment_index as u32,
+            );
+            active_symbol[FRAGMENT_HEADER_LEN..FRAGMENT_HEADER_LEN + chunk.len()]
+                .copy_from_slice(chunk);
+            let esi = self.fec.push_source(active_symbol)?;
+            let mut fec_metadata = [0_u8; 12];
+            fec_metadata[..4].copy_from_slice(&SourcePayloadId::new(esi).to_bytes());
+            let header = self.packet_header(FecSymbolKind::Source, fec_metadata);
+            self.emit_packet_with(header, active_symbol, datagram, emit)?;
+            if let Some(schedule) = repair_schedule.as_mut() {
+                schedule.source_symbols_since_repair =
+                    schedule.source_symbols_since_repair.saturating_add(1);
+                if schedule.source_symbols_since_repair >= schedule.every {
+                    schedule.source_symbols_since_repair -= schedule.every;
+                    self.push_repair_with(
+                        RepairParameters::new(schedule.next_repair_key, schedule.density),
+                        datagram,
+                        &mut *emit,
+                    )?;
+                    schedule.next_repair_key = schedule.next_repair_key.wrapping_add(1);
+                    repair_symbols = repair_symbols.saturating_add(1);
+                }
+            }
+        }
+        Ok((fragment_count as usize, repair_symbols))
+    }
+
+    /// Emits one repair symbol over the encoder's current sliding window.
+    pub fn push_repair(
+        &mut self,
+        parameters: RepairParameters,
+        output: &mut Vec<Vec<u8>>,
+    ) -> Result<RepairPayloadId> {
+        let mut datagram = vec![0; PACKET_HEADER_LEN + self.config().symbol_size()];
+        self.push_repair_with(parameters, &mut datagram, |packet| {
+            output.push(packet.to_vec());
+            Ok(())
+        })
+    }
+
+    /// Emits one repair packet immediately from reusable caller-owned storage.
+    pub fn push_repair_with(
+        &mut self,
+        parameters: RepairParameters,
+        datagram: &mut [u8],
+        mut emit: impl FnMut(&[u8]) -> Result<()>,
+    ) -> Result<RepairPayloadId> {
+        let mut symbol = [0_u8; MAX_SYMBOL_SIZE];
+        let active_symbol = &mut symbol[..self.config().symbol_size()];
+        let id = self.fec.encode_repair(parameters, active_symbol)?;
+        let mut fec_metadata = [0_u8; 12];
+        fec_metadata[..8].copy_from_slice(&id.to_bytes());
+        let header = self.packet_header(FecSymbolKind::Repair, fec_metadata);
+        self.emit_packet_with(header, active_symbol, datagram, &mut emit)?;
+        Ok(id)
+    }
+
+    fn packet_header(&self, symbol_kind: FecSymbolKind, fec_metadata: [u8; 12]) -> WireHeader {
+        WireHeader {
+            lane: self.lane,
+            record_kind: RecordKind::CopperList,
+            fec_scheme: fec_scheme(self.config().field()),
+            symbol_kind,
+            session_id: self.identity.session_id,
+            sender_id: self.identity.sender_id,
+            object_id: 0,
+            fec_metadata,
+            fragment_count: 0,
+        }
+    }
+
+    fn emit_packet_with(
+        &mut self,
+        header: WireHeader,
+        payload: &[u8],
+        datagram: &mut [u8],
+        emit: &mut impl FnMut(&[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let encoded = encode_packet_into(header, payload, datagram)?;
+        emit(&datagram[..encoded])?;
+        Ok(())
+    }
+}
+
+pub(crate) struct RepairSchedule {
+    every: usize,
+    source_symbols_since_repair: usize,
+    next_repair_key: u16,
+    density: DensityThreshold,
+}
+
+impl RepairSchedule {
+    pub(crate) fn set_interval(&mut self, every: usize) {
+        self.every = every;
+        self.source_symbols_since_repair = self
+            .source_symbols_since_repair
+            .min(every.saturating_sub(1));
+    }
+
+    pub(crate) const fn new(every: usize, next_repair_key: u16, density: DensityThreshold) -> Self {
+        Self {
+            every,
+            source_symbols_since_repair: 0,
+            next_repair_key,
+            density,
+        }
+    }
+}
+
+/// Stateful, bounded RFC 8681 decoder and ordered CopperList assembler.
+///
+/// Recovered records are delivered to the caller immediately and are never
+/// retained in an ever-growing history. Exact gap reporting assumes the sender
+/// serializes CopperLists in increasing identifier order, as generated Copper
+/// runtimes do. Assembly buffers grow on demand up to receiver limits and are
+/// recycled after delivery or expiry. Once buffer sizes and concurrency have
+/// warmed up, record assembly and borrowed delivery need no heap allocations.
+pub struct ContinuousDecoder<
+    const MAX_SYMBOL_SIZE: usize,
+    const MAX_WINDOW_SYMBOLS: usize,
+    const MAX_EQUATIONS: usize,
+> {
+    identity: StreamIdentity,
+    lane: Lane,
+    limits: ReceiverLimits,
+    fec: Box<RlcDecoder<MAX_SYMBOL_SIZE, MAX_WINDOW_SYMBOLS, MAX_EQUATIONS>>,
+    processed_symbols: Vec<EncodingSymbolId>,
+    symbols_pending: bool,
+    assemblies: Vec<RecordAssembly>,
+    ready: Vec<ReadyRecord>,
+    spares: Vec<RecordBuffers>,
+    next_object_id: u64,
+    observed_window_base: Option<EncodingSymbolId>,
+    retention_floor: Option<EncodingSymbolId>,
+    stats: ContinuousRecoveryStats,
+    source_observer: Option<crate::feedback::SourceObserver<MAX_WINDOW_SYMBOLS>>,
+}
+
+impl<const MAX_SYMBOL_SIZE: usize, const MAX_WINDOW_SYMBOLS: usize, const MAX_EQUATIONS: usize>
+    ContinuousDecoder<MAX_SYMBOL_SIZE, MAX_WINDOW_SYMBOLS, MAX_EQUATIONS>
+{
+    pub fn new(
+        identity: StreamIdentity,
+        lane: Lane,
+        config: RlcConfig,
+        equation_capacity: usize,
+        first_object_id: u64,
+        limits: ReceiverLimits,
+    ) -> Result<Self> {
+        validate_config(config, limits.max_record_bytes)?;
+        if limits.max_buffered_records < config.window_symbols() {
+            return Err(Error::InvalidConfig(
+                "buffered-record capacity must cover the RLC symbol window",
+            ));
+        }
+        Ok(Self {
+            identity,
+            lane,
+            limits,
+            fec: Box::new(RlcDecoder::new(config, equation_capacity)?),
+            processed_symbols: Vec::with_capacity(config.window_symbols()),
+            symbols_pending: false,
+            assemblies: Vec::with_capacity(limits.max_buffered_records),
+            ready: Vec::with_capacity(limits.max_buffered_records),
+            spares: Vec::with_capacity(limits.max_buffered_records),
+            next_object_id: first_object_id,
+            observed_window_base: None,
+            retention_floor: None,
+            stats: ContinuousRecoveryStats::default(),
+            source_observer: None,
+        })
+    }
+
+    /// Enable bounded finalized-loss accounting on the receiver worker.
+    pub fn enable_feedback(&mut self) {
+        self.source_observer.get_or_insert_with(Default::default);
+    }
+
+    pub fn source_outcomes(&self) -> crate::feedback::SourceOutcomes {
+        self.source_observer
+            .as_ref()
+            .map_or_else(Default::default, |observer| observer.outcomes())
+    }
+
+    pub const fn next_object_id(&self) -> u64 {
+        self.next_object_id
+    }
+
+    /// Advances ordering at a verified semantic boundary, retaining the FEC
+    /// window and already assembled records at or beyond that boundary.
+    pub(crate) fn resume_at(&mut self, boundary: u64) {
+        self.next_object_id = self.next_object_id.max(boundary);
+        let next = self.next_object_id;
+        self.discard_assemblies(|id| id < next);
+        self.discard_stale_ready();
+    }
+
+    pub const fn stats(&self) -> ContinuousRecoveryStats {
+        self.stats
+    }
+
+    pub fn occupancy(&self) -> ReceiverOccupancy {
+        ReceiverOccupancy {
+            processed_symbols: self.processed_symbols.len(),
+            incomplete_records: self.assemblies.len(),
+            ready_records: self.ready.len(),
+        }
+    }
+
+    /// Retries delivery of ordered records or gaps already ready in receiver state.
+    ///
+    /// This is useful after a consumer error and when shutting down a transport
+    /// after its final datagram. A consumer failure leaves the current event
+    /// pending so a later call can retry it.
+    pub fn drain_events<E>(
+        &mut self,
+        mut emit: impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        self.expire_and_emit(&mut emit)?;
+        if self.symbols_pending {
+            self.process_new_symbols()?;
+            self.expire_and_emit(&mut emit)?;
+        }
+        Ok(())
+    }
+
+    /// Finalizes ordered delivery through an inclusive CopperList identifier.
+    ///
+    /// Any unresolved record or wholly absent identifier through `last_object_id`
+    /// is emitted as a terminal gap. Calling this method is an explicit promise
+    /// that no more useful repair symbols for that range will arrive.
+    pub fn finish_through<E>(
+        &mut self,
+        last_object_id: u64,
+        mut emit: impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        self.process_new_symbols()?;
+        self.emit_through(last_object_id, GapReason::SessionEnded, &mut emit)?;
+        let unresolved = self
+            .assemblies
+            .iter()
+            .filter(|assembly| assembly.object_id <= last_object_id)
+            .count();
+        self.discard_assemblies(|id| id <= last_object_id);
+        self.stats.records_expired = self.stats.records_expired.saturating_add(unresolved);
+        self.discard_stale_ready();
+        Ok(())
+    }
+
+    /// Validates and submits one carrier-verified datagram. Malformed or foreign packets are counted
+    /// and ignored before they can contaminate the FEC decoder. Recovered records
+    /// and definitive gaps are emitted in CopperList-id order.
+    /// Callers must uphold the packet integrity contract of [`crate::CuStreamRx`].
+    pub fn receive_datagram<E>(
+        &mut self,
+        datagram: &[u8],
+        emit: impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        let packet = match WirePacketRef::decode(datagram) {
+            Ok(packet) => packet,
+            Err(_) => {
+                self.stats.datagrams_seen = self.stats.datagrams_seen.saturating_add(1);
+                self.stats.invalid_datagrams = self.stats.invalid_datagrams.saturating_add(1);
+                return Ok(());
+            }
+        };
+        self.receive_packet(packet, emit)
+    }
+
+    pub(crate) fn receive_packet<E>(
+        &mut self,
+        packet: WirePacketRef<'_>,
+        mut emit: impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        self.stats.datagrams_seen = self.stats.datagrams_seen.saturating_add(1);
+        if packet.header.session_id != self.identity.session_id
+            || packet.header.sender_id != self.identity.sender_id
+            || packet.header.lane != self.lane
+            || packet.header.fec_scheme != fec_scheme(self.fec.config().field())
+            || packet.header.record_kind != RecordKind::CopperList
+        {
+            self.stats.inconsistent_datagrams = self.stats.inconsistent_datagrams.saturating_add(1);
+            return Ok(());
+        }
+        if packet.payload.len() != self.fec.config().symbol_size() {
+            self.stats.invalid_datagrams = self.stats.invalid_datagrams.saturating_add(1);
+            return Ok(());
+        }
+
+        let accepted = match packet.header.symbol_kind {
+            FecSymbolKind::Source => self.receive_source_packet(&packet)?,
+            FecSymbolKind::Repair => self.receive_repair_packet(&packet)?,
+        };
+        if !accepted {
+            return Ok(());
+        }
+        if let Some(observer) = &mut self.source_observer
+            && let Some((base, _)) = self.fec.window()
+        {
+            observer.advance(base.get());
+            for (esi, _) in self.fec.known_symbols() {
+                observer.observe(esi.get(), false);
+            }
+        }
+        self.stats.valid_datagrams = self.stats.valid_datagrams.saturating_add(1);
+        self.update_retention_floor();
+        self.symbols_pending = true;
+        self.drain_events(&mut emit)
+    }
+
+    fn receive_source_packet(&mut self, packet: &WirePacketRef<'_>) -> Result<bool> {
+        let id = SourcePayloadId::from_bytes(packet.header.fec_metadata[..4].try_into().unwrap());
+        if decode_fragment(packet.payload, fragment_capacity(self.fec.config())?).is_err() {
+            self.stats.invalid_datagrams = self.stats.invalid_datagrams.saturating_add(1);
+            return Ok(false);
+        }
+        let report = match self.fec.receive_source(id.esi(), packet.payload) {
+            Ok(report) => report,
+            Err(cu_fec::Error::WindowExpired) => {
+                self.stats.expired_datagrams = self.stats.expired_datagrams.saturating_add(1);
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if let Some(observer) = &mut self.source_observer
+            && let Some((base, _)) = self.fec.window()
+        {
+            observer.advance(base.get());
+            observer.observe(id.esi().get(), true);
+        }
+        if report.status() == SourceStatus::Duplicate {
+            self.stats.duplicate_symbols = self.stats.duplicate_symbols.saturating_add(1);
+            return Ok(false);
+        }
+        self.stats.source_symbols_received = self.stats.source_symbols_received.saturating_add(1);
+        self.stats.source_symbols_recovered = self
+            .stats
+            .source_symbols_recovered
+            .saturating_add(report.recovered());
+        Ok(true)
+    }
+
+    fn receive_repair_packet(&mut self, packet: &WirePacketRef<'_>) -> Result<bool> {
+        let raw_id: [u8; 8] = packet.header.fec_metadata[..8].try_into().unwrap();
+        let id = RepairPayloadId::from_bytes(raw_id)?;
+        let report = match self.fec.receive_repair(id, packet.payload) {
+            Ok(report) => report,
+            Err(cu_fec::Error::WindowExpired) => {
+                self.stats.expired_datagrams = self.stats.expired_datagrams.saturating_add(1);
+                return Ok(false);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        self.stats.repair_symbols_received = self.stats.repair_symbols_received.saturating_add(1);
+        if report.is_innovative() {
+            self.stats.innovative_repairs = self.stats.innovative_repairs.saturating_add(1);
+        } else {
+            self.stats.redundant_repairs = self.stats.redundant_repairs.saturating_add(1);
+        }
+        self.stats.source_symbols_recovered = self
+            .stats
+            .source_symbols_recovered
+            .saturating_add(report.recovered());
+        Ok(true)
+    }
+
+    fn process_new_symbols(&mut self) -> Result<()> {
+        if !self.symbols_pending {
+            return Ok(());
+        }
+        while let Some(esi) = self
+            .fec
+            .known_symbols()
+            .map(|(esi, _)| esi)
+            .find(|esi| !self.processed_symbols.contains(esi))
+        {
+            let symbol = self
+                .fec
+                .symbol(esi)
+                .expect("known symbol disappeared from retained RLC window");
+            Self::process_fragment(
+                self.limits,
+                &mut self.assemblies,
+                &mut self.ready,
+                &mut self.spares,
+                &mut self.stats,
+                esi,
+                decode_fragment(symbol, fragment_capacity(self.fec.config())?)?,
+            )?;
+            self.processed_symbols.push(esi);
+        }
+        self.symbols_pending = false;
+        Ok(())
+    }
+
+    fn process_fragment(
+        limits: ReceiverLimits,
+        assemblies: &mut Vec<RecordAssembly>,
+        ready: &mut Vec<ReadyRecord>,
+        spares: &mut Vec<RecordBuffers>,
+        stats: &mut ContinuousRecoveryStats,
+        esi: EncodingSymbolId,
+        fragment: Fragment<'_>,
+    ) -> Result<()> {
+        if fragment.record_len > limits.max_record_bytes {
+            return Err(Error::ObjectTooLarge {
+                actual: fragment.record_len as u64,
+                maximum: limits.max_record_bytes as u64,
+            });
+        }
+        let assembly_index = match assemblies.iter().position(|assembly| {
+            assembly.kind == fragment.kind && assembly.object_id == fragment.object_id
+        }) {
+            Some(index) => index,
+            None => {
+                let count = assemblies
+                    .len()
+                    .saturating_add(ready.len())
+                    .saturating_add(1);
+                if count > limits.max_buffered_records {
+                    return Err(Error::TooManyRecords {
+                        actual: count,
+                        maximum: limits.max_buffered_records,
+                    });
+                }
+                assemblies.push(RecordAssembly::new(
+                    esi,
+                    &fragment,
+                    spares.pop().unwrap_or_default(),
+                ));
+                stats.peak_buffered_records = stats
+                    .peak_buffered_records
+                    .max(assemblies.len() + ready.len());
+                assemblies.len() - 1
+            }
+        };
+        let complete = assemblies[assembly_index].insert(esi, &fragment)?;
+        if !complete {
+            return Ok(());
+        }
+
+        let assembly = assemblies.swap_remove(assembly_index);
+        let record = RecoveredRecord::from_bytes(assembly.bytes)?;
+        let decoded = record.decoded();
+        if decoded.kind != assembly.kind || decoded.object_id != assembly.object_id {
+            return Err(Error::InconsistentObject);
+        }
+        ready.push(ReadyRecord {
+            object_id: assembly.object_id,
+            first_esi: assembly.first_esi,
+            record,
+            received: assembly.received,
+        });
+        stats.records_recovered = stats.records_recovered.saturating_add(1);
+        stats.peak_buffered_records = stats
+            .peak_buffered_records
+            .max(assemblies.len() + ready.len());
+        Ok(())
+    }
+
+    fn expire_and_emit<E>(
+        &mut self,
+        emit: &mut impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        let Some((base_esi, _)) = self.fec.window() else {
+            return Ok(());
+        };
+        self.processed_symbols
+            .retain(|esi| !esi_is_before(*esi, base_esi));
+
+        if let Some(retention_floor) = self.retention_floor {
+            loop {
+                let expired = self
+                    .assemblies
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, assembly)| assembly.has_expired_fragment(retention_floor))
+                    .min_by_key(|(_, assembly)| assembly.object_id)
+                    .map(|(index, _)| index);
+                let Some(index) = expired else {
+                    break;
+                };
+                let object_id = self.assemblies[index].object_id;
+                self.emit_through(object_id, GapReason::RlcWindowExpired, emit)?;
+                let assembly = self.assemblies.swap_remove(index);
+                self.spares.push(RecordBuffers {
+                    bytes: assembly.bytes,
+                    received: assembly.received,
+                });
+                self.stats.records_expired = self.stats.records_expired.saturating_add(1);
+            }
+        }
+
+        self.emit_ready(self.retention_floor, emit)
+    }
+
+    fn emit_ready<E>(
+        &mut self,
+        retention_floor: Option<EncodingSymbolId>,
+        emit: &mut impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        loop {
+            self.discard_stale_ready();
+            if self.emit_next_ready(emit)? {
+                continue;
+            }
+
+            let Some(retention_floor) = retention_floor else {
+                return Ok(());
+            };
+            let expired_boundary = self
+                .ready
+                .iter()
+                .filter(|record| {
+                    record.object_id > self.next_object_id
+                        && !esi_is_after(record.first_esi, retention_floor)
+                })
+                .min_by_key(|record| record.object_id)
+                .map(|record| record.object_id);
+            let Some(boundary) = expired_boundary else {
+                return Ok(());
+            };
+            self.emit_gap(boundary - 1, GapReason::RlcWindowExpired, emit)?;
+        }
+    }
+
+    fn emit_through<E>(
+        &mut self,
+        last_id: u64,
+        reason: GapReason,
+        emit: &mut impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        while self.next_object_id <= last_id {
+            self.discard_stale_ready();
+            if self.emit_next_ready(emit)? {
+                continue;
+            }
+            let next_ready = self
+                .ready
+                .iter()
+                .map(|record| record.object_id)
+                .filter(|object_id| *object_id <= last_id)
+                .min();
+            let gap_last = next_ready.map_or(last_id, |object_id| object_id - 1);
+            self.emit_gap(gap_last, reason, emit)?;
+        }
+        Ok(())
+    }
+
+    fn emit_next_ready<E>(
+        &mut self,
+        emit: &mut impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<bool, ReceiveError<E>> {
+        let Some(index) = self
+            .ready
+            .iter()
+            .position(|record| record.object_id == self.next_object_id)
+        else {
+            return Ok(false);
+        };
+        emit(ContinuousReceiveEvent::Record(&self.ready[index].record))
+            .map_err(ReceiveError::Consumer)?;
+        let ready = self.ready.swap_remove(index);
+        self.spares.push(RecordBuffers {
+            bytes: ready.record.bytes,
+            received: ready.received,
+        });
+        self.stats.records_emitted = self.stats.records_emitted.saturating_add(1);
+        self.next_object_id = self.next_object_id.wrapping_add(1);
+        Ok(true)
+    }
+
+    fn emit_gap<E>(
+        &mut self,
+        last_id: u64,
+        reason: GapReason,
+        emit: &mut impl FnMut(ContinuousReceiveEvent<'_>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), ReceiveError<E>> {
+        if last_id < self.next_object_id {
+            return Ok(());
+        }
+        let first_id = self.next_object_id;
+        emit(ContinuousReceiveEvent::Gap(CopperListGap {
+            first_id,
+            last_id,
+            reason,
+        }))
+        .map_err(ReceiveError::Consumer)?;
+        self.stats.gaps_emitted = self.stats.gaps_emitted.saturating_add(1);
+        self.stats.missing_copperlists = self
+            .stats
+            .missing_copperlists
+            .saturating_add(last_id - first_id + 1);
+        self.next_object_id = last_id.wrapping_add(1);
+        Ok(())
+    }
+
+    fn discard_stale_ready(&mut self) {
+        let mut index = 0;
+        while index < self.ready.len() {
+            if self.ready[index].object_id < self.next_object_id {
+                let ready = self.ready.swap_remove(index);
+                self.spares.push(RecordBuffers {
+                    bytes: ready.record.bytes,
+                    received: ready.received,
+                });
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    fn discard_assemblies(&mut self, discard: impl Fn(u64) -> bool) {
+        let mut index = 0;
+        while index < self.assemblies.len() {
+            if discard(self.assemblies[index].object_id) {
+                let assembly = self.assemblies.swap_remove(index);
+                self.spares.push(RecordBuffers {
+                    bytes: assembly.bytes,
+                    received: assembly.received,
+                });
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    fn update_retention_floor(&mut self) {
+        let Some((base_esi, _)) = self.fec.window() else {
+            return;
+        };
+        if self
+            .observed_window_base
+            .is_some_and(|previous| esi_is_after(base_esi, previous))
+        {
+            self.retention_floor = Some(base_esi);
+        }
+        self.observed_window_base = Some(base_esi);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ReadyRecord {
+    object_id: u64,
+    first_esi: EncodingSymbolId,
+    record: RecoveredRecord,
+    received: Vec<bool>,
+}
+
+#[derive(Debug)]
+struct Fragment<'a> {
+    kind: RecordKind,
+    object_id: u64,
+    record_len: usize,
+    fragment_index: usize,
+    fragment_count: usize,
+    fragment_capacity: usize,
+    payload: &'a [u8],
+}
+
+#[derive(Default)]
+struct RecordBuffers {
+    bytes: Vec<u8>,
+    received: Vec<bool>,
+}
+
+struct RecordAssembly {
+    kind: RecordKind,
+    object_id: u64,
+    first_esi: EncodingSymbolId,
+    bytes: Vec<u8>,
+    received: Vec<bool>,
+    received_count: usize,
+    fragment_capacity: usize,
+}
+
+impl RecordAssembly {
+    fn new(esi: EncodingSymbolId, fragment: &Fragment<'_>, mut buffers: RecordBuffers) -> Self {
+        buffers.bytes.resize(fragment.record_len, 0);
+        buffers.received.resize(fragment.fragment_count, false);
+        buffers.received.fill(false);
+        Self {
+            kind: fragment.kind,
+            object_id: fragment.object_id,
+            first_esi: esi.wrapping_sub(fragment.fragment_index as u32),
+            bytes: buffers.bytes,
+            received: buffers.received,
+            received_count: 0,
+            fragment_capacity: fragment.fragment_capacity,
+        }
+    }
+
+    fn insert(&mut self, esi: EncodingSymbolId, fragment: &Fragment<'_>) -> Result<bool> {
+        if self.bytes.len() != fragment.record_len || self.received.len() != fragment.fragment_count
+        {
+            return Err(Error::InvalidFragment("record geometry changed"));
+        }
+        if self.first_esi.wrapping_add(fragment.fragment_index as u32) != esi {
+            return Err(Error::InvalidFragment(
+                "fragment ESI does not match record geometry",
+            ));
+        }
+        let offset = fragment
+            .fragment_index
+            .checked_mul(self.fragment_capacity)
+            .ok_or(Error::InvalidFragment("fragment offset overflow"))?;
+        let end = offset
+            .checked_add(fragment.payload.len())
+            .ok_or(Error::InvalidFragment("fragment length overflow"))?;
+        if end > self.bytes.len() {
+            return Err(Error::InvalidFragment("fragment exceeds record"));
+        }
+        if self.received[fragment.fragment_index] {
+            if self.bytes[offset..end] != *fragment.payload {
+                return Err(Error::InvalidFragment("duplicate fragment differs"));
+            }
+            return Ok(self.received_count == self.received.len());
+        }
+        self.bytes[offset..end].copy_from_slice(fragment.payload);
+        self.received[fragment.fragment_index] = true;
+        self.received_count += 1;
+        Ok(self.received_count == self.received.len())
+    }
+
+    fn has_expired_fragment(&self, base_esi: EncodingSymbolId) -> bool {
+        self.received.iter().enumerate().any(|(index, received)| {
+            !received && esi_is_before(self.first_esi.wrapping_add(index as u32), base_esi)
+        })
+    }
+}
+
+fn esi_is_before(candidate: EncodingSymbolId, reference: EncodingSymbolId) -> bool {
+    (candidate.get().wrapping_sub(reference.get()) as i32) < 0
+}
+
+fn esi_is_after(candidate: EncodingSymbolId, reference: EncodingSymbolId) -> bool {
+    (candidate.get().wrapping_sub(reference.get()) as i32) > 0
+}
+
+fn validate_config(config: RlcConfig, max_record_bytes: usize) -> Result<()> {
+    let _ = fragment_capacity(config)?;
+    if max_record_bytes == 0 {
+        return Err(Error::InvalidConfig("maximum record size must be nonzero"));
+    }
+    if max_record_bytes > u32::MAX as usize {
+        return Err(Error::InvalidConfig("maximum record size exceeds u32"));
+    }
+    Ok(())
+}
+
+fn fragment_capacity(config: RlcConfig) -> Result<usize> {
+    config
+        .symbol_size()
+        .checked_sub(FRAGMENT_HEADER_LEN)
+        .filter(|capacity| *capacity > 0 && *capacity <= u16::MAX as usize)
+        .ok_or(Error::InvalidConfig(
+            "RLC symbol cannot hold the fragment header and payload",
+        ))
+}
+
+fn fec_scheme(field: Field) -> FecScheme {
+    match field {
+        Field::Gf2 => FecScheme::RlcGf2,
+        Field::Gf256 => FecScheme::RlcGf256,
+    }
+}
+
+fn encode_fragment_header(symbol: &mut [u8], object_id: u64, record_len: u32, fragment_index: u32) {
+    symbol[..4].copy_from_slice(&FRAGMENT_MAGIC);
+    symbol[4..12].copy_from_slice(&object_id.to_be_bytes());
+    symbol[12..16].copy_from_slice(&record_len.to_be_bytes());
+    symbol[16..20].copy_from_slice(&fragment_index.to_be_bytes());
+}
+
+fn decode_fragment(symbol: &[u8], fragment_capacity: usize) -> Result<Fragment<'_>> {
+    if symbol.len() < FRAGMENT_HEADER_LEN || symbol[..4] != FRAGMENT_MAGIC {
+        return Err(Error::InvalidFragment("missing fragment header"));
+    }
+    let object_id = u64::from_be_bytes(symbol[4..12].try_into().unwrap());
+    let record_len = u32::from_be_bytes(symbol[12..16].try_into().unwrap()) as usize;
+    let fragment_index = u32::from_be_bytes(symbol[16..20].try_into().unwrap()) as usize;
+    if record_len == 0 || fragment_capacity == 0 {
+        return Err(Error::InvalidFragment("invalid fragment geometry"));
+    }
+    let fragment_count = record_len.div_ceil(fragment_capacity);
+    if fragment_index >= fragment_count {
+        return Err(Error::InvalidFragment("invalid fragment geometry"));
+    }
+    // The index bound guarantees that the offset is smaller than record_len.
+    let offset = fragment_index * fragment_capacity;
+    let fragment_len = fragment_capacity.min(record_len - offset);
+    let body = &symbol[FRAGMENT_HEADER_LEN..];
+    let payload = body.get(..fragment_len).ok_or(Error::InvalidFragment(
+        "fragment length does not match geometry",
+    ))?;
+    if body[fragment_len..].iter().any(|byte| *byte != 0) {
+        return Err(Error::InvalidFragment("fragment padding is nonzero"));
+    }
+    Ok(Fragment {
+        kind: RecordKind::CopperList,
+        object_id,
+        record_len,
+        fragment_index,
+        fragment_count,
+        fragment_capacity,
+        payload,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fragment_header_round_trips_and_rejects_padding() {
+        let mut symbol = [0_u8; 52];
+        encode_fragment_header(&mut symbol, 42, 40, 1);
+        symbol[FRAGMENT_HEADER_LEN..FRAGMENT_HEADER_LEN + 8].copy_from_slice(b"fragment");
+        assert_eq!(FRAGMENT_HEADER_LEN, 20);
+        assert_eq!(&symbol[..4], b"CUFR");
+        assert_eq!(&symbol[4..12], &42_u64.to_be_bytes());
+        assert_eq!(&symbol[12..16], &40_u32.to_be_bytes());
+        assert_eq!(&symbol[16..20], &1_u32.to_be_bytes());
+        let decoded = decode_fragment(&symbol, 32).unwrap();
+        assert_eq!(decoded.kind, RecordKind::CopperList);
+        assert_eq!(decoded.object_id, 42);
+        assert_eq!(decoded.record_len, 40);
+        assert_eq!(decoded.fragment_index, 1);
+        assert_eq!(decoded.fragment_count, 2);
+        assert_eq!(decoded.payload, b"fragment");
+
+        symbol[51] = 1;
+        assert_eq!(
+            decode_fragment(&symbol, 32).unwrap_err(),
+            Error::InvalidFragment("fragment padding is nonzero")
+        );
+    }
+
+    #[test]
+    fn fragment_geometry_handles_record_boundaries() {
+        for (record_len, index, count, len) in [
+            (1, 0, 1, 1),
+            (31, 0, 1, 31),
+            (32, 0, 1, 32),
+            (33, 0, 2, 32),
+            (33, 1, 2, 1),
+            (64, 1, 2, 32),
+            (65, 2, 3, 1),
+            (u32::MAX, 134_217_727, 134_217_728, 31),
+        ] {
+            let mut symbol = [0_u8; 52];
+            encode_fragment_header(&mut symbol, u64::MAX, record_len, index);
+            symbol[FRAGMENT_HEADER_LEN..FRAGMENT_HEADER_LEN + len].fill(0xa5);
+            let fragment = decode_fragment(&symbol, 32).unwrap();
+            assert_eq!(fragment.fragment_count, count);
+            assert_eq!(fragment.payload, &vec![0xa5; len]);
+        }
+        // Exercise the largest index and count without allocating a large record.
+        let mut symbol = [0_u8; 21];
+        encode_fragment_header(&mut symbol, 42, u32::MAX, u32::MAX - 1);
+        let fragment = decode_fragment(&symbol, 1).unwrap();
+        assert_eq!(fragment.fragment_count, u32::MAX as usize);
+        assert_eq!(fragment.payload.len(), 1);
+    }
+
+    #[test]
+    fn fragment_rejects_invalid_geometry_and_truncation() {
+        let mut symbol = [0_u8; 52];
+        for (record_len, index, capacity) in [
+            (0, 0, 32),
+            (32, 0, 0),
+            (32, 1, 32),
+            (33, 2, 32),
+            (u32::MAX, u32::MAX, 1),
+        ] {
+            encode_fragment_header(&mut symbol, 42, record_len, index);
+            assert_eq!(
+                decode_fragment(&symbol, capacity).unwrap_err(),
+                Error::InvalidFragment("invalid fragment geometry")
+            );
+        }
+        for (record_len, index, len) in [(32, 0, 32), (40, 1, 8)] {
+            encode_fragment_header(&mut symbol, 42, record_len, index);
+            for end in 0..FRAGMENT_HEADER_LEN + len {
+                assert!(decode_fragment(&symbol[..end], 32).is_err());
+            }
+            assert!(decode_fragment(&symbol[..FRAGMENT_HEADER_LEN + len], 32).is_ok());
+        }
+        symbol[0] ^= 1;
+        assert_eq!(
+            decode_fragment(&symbol, 32).unwrap_err(),
+            Error::InvalidFragment("missing fragment header")
+        );
+    }
+}

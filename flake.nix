@@ -20,7 +20,24 @@
     rust-overlay,
     ...
   }:
-    flake-utils.lib.eachDefaultSystem (system: let
+    let
+      mkRobot = buildSystem:
+        nixpkgs.lib.nixosSystem {
+          system = buildSystem;
+          specialArgs = { inherit robotics-scripts; };
+          modules = [
+            ./nix/robot.nix
+            {
+              nixpkgs.buildPlatform = buildSystem;
+              nixpkgs.hostPlatform = "aarch64-linux";
+            }
+          ];
+        };
+    in
+      {
+        nixosConfigurations.robot = mkRobot "aarch64-linux";
+      }
+      // flake-utils.lib.eachDefaultSystem (system: let
       overlays = [(import rust-overlay)];
       pkgs = import nixpkgs {
         inherit system overlays;
@@ -39,6 +56,7 @@
             rust-analyzer
             git
             jujutsu
+            rpi-imager
 
             perf
             protobuf
@@ -107,10 +125,10 @@
 
 
 
-          env.MUJOCO_PATH = "${mujoco}";
-          env.MUJOCO_PLUGIN_PATH = "${mujoco}/lib";
-          env.MUJOCO_DYNAMIC_LINK_DIR = "${mujoco}/lib";
-
+          # env.MUJOCO_PATH = "${mujoco}";
+          # env.MUJOCO_PLUGIN_PATH = "${mujoco}/lib";
+          # env.MUJOCO_DYNAMIC_LINK_DIR = "${mujoco}/lib";
+          #
           libpath = lib.concat buildInputs [fontconfig.lib sqlite.out];
 
           LD_LIBRARY_PATH = "${lib.makeLibraryPath libpath}";
@@ -118,15 +136,12 @@
 
         };
 
-        packages.default = pkgs.rustPlatform.buildRustPackage rec {
-          pname = "evosim"; # Replace with your package name
-          version = "0.1.0";           # Replace with your version
-
-          # The source of your project (the current directory)
-          src = ./evosim;
-          # Specify the location of your Cargo.lock file
-          cargoLock.lockFile = ./Cargo.lock;
+        devShells = lib.optionalAttrs stdenv.isLinux {
+          rpi = import ./nix/cross-shell.nix {inherit pkgs;};
         };
 
+        packages = lib.optionalAttrs stdenv.isLinux {
+          robot-image = (mkRobot system).config.system.build.sdImage;
+        };
       });
 }
