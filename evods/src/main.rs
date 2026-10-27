@@ -102,6 +102,7 @@ fn zruntime(
     mut pad_rx: watch::Receiver<GamepadSnapshot>,
     mut cmd_rx: mpsc::Receiver<UiCommand>,
     status_tx: watch::Sender<DriverStationSnapshot>,
+    host: String,
 ) {
     println!("[zruntime] building tokio runtime");
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -115,8 +116,10 @@ fn zruntime(
     runtime.block_on(async move {
         println!("[zruntime] runtime running");
         let mut config = zenoh::Config::default();
+        let endpoint = format!("tcp/{host}:7447");
+        let endpoints = serde_json::to_string(&[endpoint]).unwrap();
         config
-            .insert_json5("connect/endpoints", r#"["tcp/evolution.local:7447"]"#)
+            .insert_json5("connect/endpoints", &endpoints)
             .unwrap();
         let session = zenoh::open(config).await.unwrap();
         let telsub = session.declare_subscriber("evods/tel/*").await.unwrap();
@@ -192,6 +195,10 @@ fn zruntime(
 }
 
 fn main() -> eframe::Result<()> {
+    let host = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "evolution.local".to_owned());
+
     // Joystick latest-state channel.
     let (pad_tx, pad_rx) = watch::channel(GamepadSnapshot::default());
 
@@ -203,7 +210,7 @@ fn main() -> eframe::Result<()> {
 
     // Spawn the two background workers up front, before the UI starts.
     std::thread::spawn(move || joy::runtime(pad_tx));
-    std::thread::spawn(move || zruntime(pad_rx, cmd_rx, status_tx));
+    std::thread::spawn(move || zruntime(pad_rx, cmd_rx, status_tx, host));
 
     ui::run(cmd_tx, status_rx)
 }

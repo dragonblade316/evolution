@@ -1,5 +1,5 @@
 
-use cu29::{clock::{CuDuration, CuInstant, Instant}, cutask::{CuMsg, CuTask, Freezable}, input_msg, output_msg, units::si::{angular_velocity::revolution_per_minute, f32::AngularVelocity}};
+use cu29::{clock::{CuDuration, CuTime}, cutask::{CuMsg, CuTask, Freezable}, input_msg, output_msg, units::si::{angular_velocity::revolution_per_minute, f32::AngularVelocity}};
 use common::{GamePadState, MotorCMD};
 use cu29::prelude::*;
 
@@ -20,7 +20,7 @@ enum IntakeState {
 #[reflect(opaque, from_reflect = false, no_field_bounds)]
 pub struct S1IntakeStateMachine {
     state: IntakeState,
-    retract_time: Instant,
+    retract_time: CuTime,
     intake_speed: AngularVelocity,
 }
 
@@ -30,7 +30,7 @@ impl Freezable for S1IntakeStateMachine{
 
 impl S1IntakeStateMachine {
     fn retract(&mut self, ctx: &cu29::prelude::CuContext) {
-        self.retract_time = CuInstant::now();
+        self.retract_time = ctx.now();
         self.state = IntakeState::RETRACT;
     }
 }
@@ -55,7 +55,7 @@ impl CuTask for S1IntakeStateMachine {
 
                 Ok(Self {
                     state: IntakeState::IDLE,
-                    retract_time: CuInstant::now(),
+                    retract_time: CuTime::from_nanos(0),
                     intake_speed,
                 })
     }
@@ -72,6 +72,12 @@ impl CuTask for S1IntakeStateMachine {
 
 
             let cmd = input.payload().unwrap_or(&SuperState::Disabled);
+
+            if matches!(cmd, SuperState::Disabled) {
+                self.state = IntakeState::IDLE;
+                output.0.set_payload(MotorCMD::Stop);
+                return Ok(());
+            }
 
             match self.state {
                 IntakeState::IDLE => {
@@ -122,7 +128,7 @@ impl CuTask for S1IntakeStateMachine {
                 IntakeState::RETRACT => {
                     output.0.set_payload(revcmd);
                     output.1.set_payload(true);
-                    if CuInstant::now() - self.retract_time > CuDuration::from_millis(500) {
+                    if ctx.now() - self.retract_time > CuDuration::from_millis(500) {
                         self.state = IntakeState::IDLE;
                     }
                 }

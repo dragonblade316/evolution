@@ -35,23 +35,17 @@ name = "masterpiece-twin"
 path = "src/twin.rs"
 required-features = ["sim-debug"]
 
-[[bin]]
-name = "masterpiece-evoviz-logreader"
-path = "src/evoviz_logreader.rs"
-required-features = ["evoviz-logreader"]
-
 [features]
 default = ["logstream"]
 logstream = ["cu29/logstream", "dep:cu29-logstream"]
 logreader = ["dep:cu29-export"]
-evoviz-logreader = ["logreader", "dep:evoviz_test"]
 pc = ["logstream"]
-sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug", "dep:cuviz", "dep:ctrlc"]
+sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug", "dep:evoviz", "dep:ctrlc"]
 
 [dependencies]
 cu29 = { workspace = true, features = ["reflect"] }
 cu29-export = { workspace = true, optional = true }
-cu29-logstream = { version = "1.2.1", optional = true }
+cu29-logstream = { version = "1.3.0", optional = true }
 serde = { workspace = true }
 rapier2d = { workspace = true }
 glam = { workspace = true }
@@ -74,15 +68,13 @@ allience_spesific_tasks = { workspace = true }
 apriltag_tasks = { workspace = true }
 sotm_rt = { workspace = true }
 turret_tasks = { workspace = true }
-evoviz = { workspace = true }
+evoviz = { workspace = true, features = ["logstream"], optional = true }
 rpsinks = { workspace = true }
 cu-apriltag = { workspace = true }
 cu-v4l = { workspace = true }
 cu-logmon = { workspace = true }
 evosim = { workspace = true }
 evods = { workspace = true }
-evoviz_test = { path = "../../external/evoviz_test", optional = true }
-cuviz = { path = "../../external/cuviz-test/cuviz", features = ["logstream"], optional = true }
 ctrlc = { version = "3.5.2", optional = true }
 rerun = { workspace = true }
 cu-zenoh-bridge = { workspace = true }

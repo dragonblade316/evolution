@@ -18,4 +18,4 @@ config:
 
 # MoteusBridge
 
-Bidirectional copper bridge to moteus motors over the singleton CAN transport. `send` translates `MotorCMD` (Position/Velocity; SI rad → moteus rev) into a `PositionCommand`, applies per-TX-channel limits/gains, and writes it. `Stop` and `MotorCMD::Torque` are handled (torque currently errors). `receive` queries each RX motor and packs position/velocity/torque/temp/voltage/fault into `MoteusData`. `stop` issues `set_stop` to all TX motors.
+Bidirectional copper bridge to moteus motors over the singleton CAN transport. `send` translates `MotorCMD` (Position/Velocity; SI rad → moteus rev) into a `PositionCommand`, applies per-TX-channel limits/gains, and writes it. `Stop` and `MotorCMD::Torque` are handled (torque currently errors). `receive` queries each RX motor and packs position/velocity/torque/temp/voltage/fault/mode into `MoteusData`. `stop` issues `set_stop` to all TX motors.

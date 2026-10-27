@@ -1,9 +1,0 @@
-[viewer]
-time_series = ["copper/outputs/drive/payload/speed"]
-
-[outputs."0"]
-name = "drive"
-
-[outputs."1.0"]
-name = "robot_pose"
-kind = "pose"

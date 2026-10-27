@@ -2,18 +2,22 @@
 
 Shoot-on-the-move real-time targeting task. Given the robot's pose, a runtime target transform, and velocity, computes the turret angle and muzzle velocity required to hit the target.
 
+See [MATH.md](MATH.md) for the trajectory and air-drag equations.
+
 ## Config
 
 ```ron
 // In copperconfig.ron, under the SOTM task node:
-(
-    turret_offset: [0.1, 0.0, 0.5],   // [x, y, z] relative to robot center
-)
+config: {
+    "turret_offset": [0.1, 0.0, 0.5], // [x, y, z] relative to robot center
+    "drag_coefficient": 0.5,
+},
 ```
 
-`turret_offset` is optional and defaults to `[0.1, 0.0, 0.5]`. The target is
-provided at runtime as a `Transform3D<f64>` input, so no target position is
-configured on the SOTM task.
+Both options are optional. `turret_offset` defaults to `[0.1, 0.0, 0.5]` and
+the dimensionless `drag_coefficient` defaults to `0.5`. The target is provided
+at runtime as a `Transform3D<f64>` input, so no target position is configured
+on the SOTM task.
 
 ## Input / Output
 
@@ -30,9 +34,9 @@ robot Pose + target Transform3D + ChassisSpeeds
   → turret world position & velocity (offset rotated by heading)
   → decompose into parallel/perpendicular axes vs goal
   → solve(dist_to_goal, dz, v_∥, v_⊥, heading, goal_direction)
-       → solve_range → [muzzle_velocity_initial, tof]
+       → solve_range with quadratic air drag → [muzzle_velocity_initial, tof]
        → solve_angle → (θ_lateral, r)
-       → solve_range(r, dz) → [muzzle_velocity_final, _]
+       → solve_range(r, dz) with quadratic air drag → [muzzle_velocity_final, _]
        → turret_angle = (goal_direction − heading − π/2) + θ_lateral
        → return (turret_angle, muzzle_velocity)
   → output: (turret_angle, muzzle_velocity)
@@ -52,6 +56,10 @@ robot Pose + target Transform3D + ChassisSpeeds
 | `θ_lateral` | Correction opposite the robot's lateral velocity |
 | `turret_angle` | `angle_front_to_goal + θ_lateral` — final turret aim |
 | `muzzle_velocity` | Launch velocity from the second `solve_range` pass |
+
+The trajectory model uses quadratic drag, `F = ½ρC_dAv²`, with air density
+`1.204 kg/m³`, ball radius `0.15 m`, ball mass `0.283 kg`, and the configured
+`drag_coefficient`.
 
 The target transform's translation supplies `[x, y, z]` in the world frame.
 Its rotation is ignored because SOTM aims at the target point rather than an

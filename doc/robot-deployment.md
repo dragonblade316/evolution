@@ -41,24 +41,50 @@ access to the `dialout`, `video`, `input`, `gpio`, and `spi` groups.
 
 ### Rebuild from the public GitHub repository
 
-Commit and push configuration changes before rebuilding from GitHub. Run the following on
-the Raspberry Pi:
+Commit and push configuration changes before rebuilding from GitHub. The installed system
+provides a fixed-purpose passwordless wrapper:
 
 ```bash
-sudo nixos-rebuild switch --refresh --flake github:dragonblade316/evolution#robot
+sudo /run/current-system/sw/bin/evolution-system-rebuild
 sudo reboot
 ```
 
-A reboot is required when the device-tree configuration changes. The flake enables the
+The wrapper always switches to `github:dragonblade316/evolution#robot`; it does not accept
+an arbitrary flake or command. The rebuild enables passwordless sudo for every command run
+by `dragonblade316`, so subsequent administrative commands do not require a password. A
+reboot is required when the device-tree configuration changes. The flake enables the
 `nix-command` and `flakes` experimental features on the robot.
 
-To rebuild a specific pushed revision instead of the repository's default branch:
+If the currently deployed image predates the rebuild wrapper, its locked user password
+means the first update still requires recovery/root access or reflashing.
+
+## Raspberry Pi health diagnostics
+
+The robot image includes Raspberry Pi firmware tools and enables zram swap with a maximum
+uncompressed size equal to four times system RAM. Check rebuild memory pressure with:
 
 ```bash
-sudo nixos-rebuild switch --refresh \
-  --flake github:dragonblade316/evolution/<commit-or-branch>#robot
-sudo reboot
+free -h
+swapon --show
+zramctl
 ```
+
+Monitor power and temperature while rebuilding:
+
+```bash
+watch -n1 'vcgencmd get_throttled; vcgencmd measure_temp'
+```
+
+`throttled=0x0` means no power or thermal issue has been detected. Bit `0x1` means the Pi
+is currently undervoltage, while sticky bit `0x10000` means undervoltage occurred earlier
+in the current boot. Check the previous boot for undervoltage or out-of-memory failures:
+
+```bash
+sudo journalctl -k -b -1 | grep -Ei 'under.?voltage|voltage normal|out of memory|killed process|oom'
+```
+
+The image also includes `sensors`, I2C, SPI, and GPIO command-line diagnostics for attached
+hardware.
 
 ## PWM servo on GPIO12
 
@@ -92,6 +118,33 @@ ls -l /sys/class/pwm/pwmchip0/pwm0
 systemctl status evolution.service
 ```
 
+## BNO08x IMU on SPI0 CE0
+
+The IMU uses the Raspberry Pi's standard SPI0 pins and CE0:
+
+| Signal | BCM GPIO | Physical pin |
+| --- | ---: | ---: |
+| CE0 | 8 | 24 |
+| MISO | 9 | 21 |
+| MOSI | 10 | 19 |
+| SCLK | 11 | 23 |
+| RSTN | 24 | 18 |
+| HINTN | 25 | 22 |
+
+The Copper source opens `/dev/spidev0.0` and `/dev/gpiochip0`. The `spi` and `gpio`
+groups grant the application access to both devices. The source enables calibrated gyro
+reports every 10 ms and publishes the Z axis as yaw velocity. `DiffDriveOmegaFusion`
+combines it with wheel-derived yaw velocity before localization.
+
+Check device permissions after reboot with:
+
+```bash
+ls -l /dev/spidev0.0 /dev/gpiochip0
+```
+
+If the sensor is mounted with its Z axis reversed relative to robot-positive yaw, the
+published value will need a sign correction in `BNOSource`.
+
 ## Camera configuration
 
 The attached Arducam OV9281 advertises `MJPG` and `YUYV`; it does not advertise the
@@ -107,6 +160,10 @@ V4l device 0 does not provide a format with the FourCC GREY
 A 1280x720 YUYV frame is 1,843,200 bytes. Copper's live-stream maximum record size is set
 to 2 MiB (`TWIN_MAX_RECORD_BYTES = 2097152`) so a complete CopperList can include the raw
 frame and the remaining telemetry.
+
+The current AprilTag adapter expects a single-channel image but receives this two-byte
+YUYV format. This does not prevent the runtime from starting, but AprilTag results should
+not be trusted until a YUYV-to-GREY conversion is inserted before the detector.
 
 ## Deploying `masterpiece`
 
@@ -144,13 +201,20 @@ ssh dragonblade316@evolution.local 'journalctl -fu evolution.service'
 
 ## Driver station
 
-The driver station explicitly connects to the robot's Zenoh router at
-`tcp/evolution.local:7447` instead of relying on multicast discovery.
+The driver station explicitly connects to a Zenoh router instead of relying on
+multicast discovery. It defaults to `evolution.local`; pass a different host or IP
+as the first argument.
 
-Start it from the development PC:
+Connect to the robot:
 
 ```bash
-cargo run -p evods
+cargo run -p evods -- evolution.local
+```
+
+Connect to a local simulation:
+
+```bash
+cargo run -p evods -- localhost
 ```
 
 Verify the router on the robot with:
@@ -167,8 +231,7 @@ includes the raw camera frame, detections, estimated pose, commands, and motor s
 Transport packets use a 1200-byte MTU and forward-error correction with one continuous
 repair symbol for every four source symbols.
 
-The repository patches crates.io `cu29-logstream` with `external/cu29-logstream`. The local
-patch adds configurable receiver record limits, allowing the twin to accept the 2 MiB
+The twin configures Copper's receiver record and archive section limits to accept the 2 MiB
 records required by camera frames.
 
 Start the twin before deploying or restarting the robot:
@@ -212,7 +275,11 @@ cargo check -p masterpiece --features sim-debug --bin masterpiece-twin
 nix eval --raw .#nixosConfigurations.robot.config.system.build.toplevel.drvPath
 ```
 
-The PWM0/GPIO12 device-tree overlay and generated `evolution.service` unit can be built on
-the development PC. A complete x86-to-aarch64 image build currently stops at the
-architecture-specific `moteus` source package; rebuilding natively on the Raspberry Pi
-avoids that cross-build mismatch.
+Build the complete Raspberry Pi image from the development PC with:
+
+```bash
+nix build --max-jobs 1 --cores 1 .#robot-image --out-link result-robot-image
+```
+
+The compressed image is written to
+`result-robot-image/sd-image/evolution-rpi3.img.zst`.

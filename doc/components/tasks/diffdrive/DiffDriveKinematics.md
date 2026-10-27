@@ -6,7 +6,6 @@ subsystem: drive
 input: "ChassisSpeeds"
 output: "DiffDriveSpeeds"
 config:
-  wheel_radius: "f32 m (default 0.1)"  # unused here, see DiffDriveCmd
   trackwidth: "f32 m (default 0.3)"
 ---
 

@@ -42,12 +42,15 @@ masterpiece-sim:
   #!/usr/bin/env bash
   set -euo pipefail
 
+  zenohd &
+  ZENOH_PID=$!
+
   cargo run -p evods &
   EVODS_PID=$!
 
   cleanup() {
-    kill "$EVODS_PID" 2>/dev/null || true
-    wait "$EVODS_PID" 2>/dev/null || true
+    kill "$EVODS_PID" "$ZENOH_PID" 2>/dev/null || true
+    wait "$EVODS_PID" "$ZENOH_PID" 2>/dev/null || true
   }
   trap cleanup EXIT INT TERM
 

@@ -96,6 +96,8 @@ let
   };
 in
 {
+  networking.modemmanager.enable = false;
+
   networking.networkmanager = {
     enable = true;
     ensureProfiles.profiles.evolution-ethernet = {

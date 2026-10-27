@@ -7,8 +7,9 @@ input: "(Pose<f64> robot, Transform3D<f64> target, ChassisSpeeds)"
 output: "(f64 turret_angle, f64 muzzle_velocity)"
 config:
   turret_offset: "[f64;3] (default [0.1, 0.0, 0.5])"
+  drag_coefficient: "f64 (default 0.5)"
 ---
 
 # SOTM
 
-Shooter On The Move solver. Computes turret yaw and muzzle velocity so a projectile (60° hood) lands on a moving target while accounting for turret offset and robot velocity. Turret yaw is measured counterclockwise from robot-forward (local +Y), so zero radians points straight ahead. The target is supplied at runtime as a world-frame `Transform3D<f64>`; its translation is used as the target point and its rotation is ignored. Pipeline: solve range/TOF via Gauss-Newton on an ODE IVP (`eqsolver` + `ivp`), compute lead opposite lateral chassis motion, and re-solve for muzzle velocity. Exposes `solve_muzzle_velocity` for the static `angleseek` analysis binary.
+Shooter On The Move solver. Computes turret yaw and muzzle velocity so a projectile (60° hood) lands on a moving target while accounting for turret offset, robot velocity, and quadratic air drag. Turret yaw is measured counterclockwise from robot-forward (local +Y), so zero radians points straight ahead. The target is supplied at runtime as a world-frame `Transform3D<f64>`; its translation is used as the target point and its rotation is ignored. Pipeline: solve range/TOF via Gauss-Newton on an ODE IVP (`eqsolver` + `ivp`), compute lead opposite lateral chassis motion, and re-solve for muzzle velocity. The drag model uses `F = ½ρC_dAv²`, with `C_d` supplied by `drag_coefficient`. Exposes `solve_muzzle_velocity` for the static `angleseek` analysis binary.

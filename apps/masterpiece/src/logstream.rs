@@ -79,6 +79,13 @@ pub fn sender_config<P: CaptureDataSet>(
     let plan = LogStreamPlan::resolve(&destination)
         .map_err(|error| CuError::from(format!("invalid log stream configuration: {error}")))?;
 
-    plan.sender_config(identity, P::stream_schema())
+    plan.sender_config(
+        identity,
+        P::stream_schema(),
+        SectionContext {
+            instance_id: identity.sender_id,
+            ..Default::default()
+        },
+    )
         .map_err(|error| CuError::from(format!("failed to configure log stream: {error}")))
 }

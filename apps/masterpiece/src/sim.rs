@@ -104,6 +104,7 @@ fn main() {
                     temp: 32.2,
                     voltage: 22.2,
                     fault: 0,
+                    mode: 10,
                 };
                 msg.set_payload(payload);
                 SimOverride::ExecutedBySim
@@ -116,6 +117,7 @@ fn main() {
                     temp: 32.2,
                     voltage: 22.2,
                     fault: 0,
+                    mode: 10,
                 };
                 msg.set_payload(payload);
                 SimOverride::ExecutedBySim
@@ -150,6 +152,7 @@ fn main() {
                     temp: 32.2,
                     voltage: 22.2,
                     fault: 0,
+                    mode: 10,
                 });
                 SimOverride::ExecutedBySim
             }
@@ -183,6 +186,7 @@ fn main() {
                     temp: 32.2,
                     voltage: 22.2,
                     fault: 0,
+                    mode: 10,
                 });
                 SimOverride::ExecutedBySim
             }
@@ -235,7 +239,9 @@ fn main() {
         .build()
         .expect("Failed to create application.");
 
-    let _ = application.start_all_tasks(&mut sim_callback);
+    application
+        .start_all_tasks(&mut sim_callback)
+        .expect("Failed to start application.");
     let period = Duration::from_secs_f32(TIME_STEP);
     let mut timestamp = Instant::now();
     loop {

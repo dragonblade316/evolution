@@ -2,26 +2,24 @@
 members = [
     "apps/cu_example_app",
     "apps/masterpiece",
-    "external/cu29-logstream",
     "apps/proto",
     "components/bridges/moteus_bridge", "components/tasks/diffdrive",
     "components/payloads/common", "components/sources/oakd_lite_source", "components/tasks/field_oriented_diff_drive", "components/tasks/iekflocalizer",     "components/tasks/drive_utils",
-    "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "external/motctl", "components/sources/Joy", "components/tasks/Prototyping", "components/tasks/turret_tasks", "components/sinks/evoviz", "components/sinks/rpsinks", "evods", "components/sources/BNOSource", "external/evograph", "components/tasks/allience_spesific_tasks", "components/tasks/apriltag_tasks", "external/evoviz_test", "external/cuviz-test/cuviz", "external/cuviz-test/cuviz-macros", "external/cuviz-test/cuviz-core"]
+    "components/tasks/moteus_tasks", "components/tasks/sotm_rt", "external/evosim", "external/motctl", "components/sources/Joy", "components/tasks/Prototyping", "components/tasks/turret_tasks", "components/sinks/rpsinks", "evods", "components/sources/BNOSource", "external/evograph", "components/tasks/allience_spesific_tasks", "components/tasks/apriltag_tasks", "external/evoviz"]
 resolver = "2"
 
 [profile.dev]
 opt-level = 2
 
 [workspace.dependencies]
-# cu29 = { version = "1.1.0", features = ["reflect"] }
-cu29 = "1.2.1"
-cu-spatial-payloads = "1.2.1"
-cu-sensor-payloads = "1.2.1"
-cu-apriltag = "1.2.1"
-cu-v4l = "1.2.1"
-cu-logmon = "1.2.1"
-cu29-export = { version = "1.2.1" }
-cu-zenoh-bridge = "1.2.1"
+cu29 = "1.3.1"
+cu-spatial-payloads = "1.3.0"
+cu-sensor-payloads = "1.3.1"
+cu-apriltag = "1.3.0"
+cu-v4l = "1.3.0"
+cu-logmon = "1.3.0"
+cu29-export = { version = "1.3.0" }
+cu-zenoh-bridge = "1.3.0"
 serde = { version = "*", features = ["derive"] }
 nalgebra = "0.34.2"
 rerun = "0.33.1"
@@ -33,7 +31,7 @@ sophus = "0.15.0"
 moteus = "0.5.3"
 rapier2d = "0.33.0"
 glam = "0.33.2"
-bincode = { version = "2.0", package = "cu-bincode", default-features = false, features = ["derive", "alloc"] }
+bincode = { version = "2.2.0", package = "cu-bincode", default-features = false, features = ["derive", "alloc"] }
 crossbeam-channel = "0.5"
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 zenoh = { version = "1.9.0", default-features = false, features = ["transport_tcp", "transport_udp", "transport_unixsock-stream"] }
@@ -55,12 +53,9 @@ allience_spesific_tasks = { path = "./components/tasks/allience_spesific_tasks/"
 apriltag_tasks = { path = "./components/tasks/apriltag_tasks/" }
 sotm_rt = { path = "./components/tasks/sotm_rt/" }
 turret_tasks = { path = "./components/tasks/turret_tasks/" }
-evoviz = { path = "./components/sinks/evoviz/" }
+evoviz = { path = "./external/evoviz/" }
 rpsinks = { path = "./components/sinks/rpsinks/" }
 evosim = { path = "./external/evosim/" }
 evods = { path = "./evods/" }
 Joy = { path = "./components/sources/Joy/" }
 Prototyping = { path = "./components/tasks/Prototyping/" }
-
-[patch.crates-io]
-cu29-logstream = { path = "external/cu29-logstream" }

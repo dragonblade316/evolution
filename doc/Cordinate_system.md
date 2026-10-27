@@ -17,4 +17,4 @@ theta: Counter Clockwise. (0 is pointing up)
 
 ## Game spesific
 The point which is considered the bottom left will need to be defined for each game.
-- Liftoff: The corner of the bottom left goal
+- Liftoff: Under the blue goal

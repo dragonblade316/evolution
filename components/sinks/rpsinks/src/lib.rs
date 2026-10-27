@@ -1,7 +1,7 @@
 use cu29::cutask::{CuSinkTask, Freezable};
 use cu29::prelude::*;
 use cu29::reflect::Reflect;
-use rppal::pwm::{Channel, Pwm};
+use rppal::pwm::{Channel, Polarity, Pwm};
 use std::time::Duration;
 
 const DEFAULT_FREQUENCY_HZ: f64 = 50.0;
@@ -46,25 +46,39 @@ impl CuSinkTask for BinaryServo {
             ),
         };
 
-        let ch = Channel::try_from(channel)
-            .map_err(|e| CuError::from(format!("BinaryServo: invalid PWM channel: {e:?}")))?;
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return Err("BinaryServo: frequency_hz must be finite and greater than zero".into());
+        }
+        if !deployed_us.is_finite()
+            || !undeployed_us.is_finite()
+            || deployed_us < 0.0
+            || undeployed_us < 0.0
+        {
+            return Err("BinaryServo: pulse widths must be finite and non-negative".into());
+        }
 
-        let pwm = Pwm::with_frequency(
-            ch,
-            frequency,
-            0.0,
-            rppal::pwm::Polarity::Normal,
+        let period = Duration::from_secs_f64(1.0 / frequency);
+        let deployed_pulse = Duration::from_secs_f64(deployed_us / 1_000_000.0);
+        let undeployed_pulse = Duration::from_secs_f64(undeployed_us / 1_000_000.0);
+        if deployed_pulse > period || undeployed_pulse > period {
+            return Err("BinaryServo: pulse width cannot exceed the PWM period".into());
+        }
+
+        let channel = Channel::try_from(channel)
+            .map_err(|error| CuError::from(format!("BinaryServo: invalid PWM channel: {error:?}")))?;
+        let pwm = Pwm::with_period(
+            channel,
+            period,
+            undeployed_pulse,
+            Polarity::Normal,
             true,
         )
-        .map_err(|e| CuError::from(format!("BinaryServo: PWM init failed: {e:?}")))?;
-
-        pwm.enable()
-            .map_err(|e| CuError::from(format!("BinaryServo: PWM enable failed: {e:?}")))?;
+        .map_err(|error| CuError::from(format!("BinaryServo: PWM init failed: {error:?}")))?;
 
         Ok(Self {
             pwm,
-            deployed_pulse: Duration::from_micros(deployed_us as u64),
-            undeployed_pulse: Duration::from_micros(undeployed_us as u64),
+            deployed_pulse,
+            undeployed_pulse,
         })
     }
 
@@ -81,7 +95,7 @@ impl CuSinkTask for BinaryServo {
 
         self.pwm
             .set_pulse_width(target)
-            .map_err(|e| CuError::from(format!("BinaryServo: set_pulse_width failed: {e:?}")))?;
+            .map_err(|error| CuError::from(format!("BinaryServo: set_pulse_width failed: {error:?}")))?;
 
         debug!(
             "BinaryServo: deployed={}, pulse_width={:?}",
@@ -94,7 +108,7 @@ impl CuSinkTask for BinaryServo {
     fn stop(&mut self, _ctx: &CuContext) -> CuResult<()> {
         self.pwm
             .disable()
-            .map_err(|e| CuError::from(format!("BinaryServo: PWM disable failed: {e:?}")))?;
+            .map_err(|error| CuError::from(format!("BinaryServo: PWM disable failed: {error:?}")))?;
         Ok(())
     }
 }

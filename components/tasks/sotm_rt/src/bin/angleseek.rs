@@ -11,7 +11,7 @@ use std::thread::{self, JoinHandle};
 use eframe::egui;
 use egui_plot::{Line, Plot, PlotPoints, Points};
 
-use sotm_rt::solve_muzzle_velocity;
+use sotm_rt::{solve_muzzle_velocity, DEFAULT_DRAG_COEFFICIENT};
 
 // ----------------------------------------------------------------------------
 // Input parameters
@@ -36,6 +36,8 @@ struct Params {
     goal_height: f64,
     /// Velocity ceiling (m/s). Solutions above this are treated as unsolvable.
     max_velocity: f64,
+    /// Dimensionless aerodynamic drag coefficient.
+    drag_coefficient: f64,
 }
 
 impl Default for Params {
@@ -49,6 +51,7 @@ impl Default for Params {
             angle_step: 0.1,
             goal_height: 1.0,
             max_velocity: 30.0,
+            drag_coefficient: DEFAULT_DRAG_COEFFICIENT,
         }
     }
 }
@@ -118,6 +121,7 @@ impl Dataset {
                             params.goal_height,
                             angle_deg,
                             params.max_velocity,
+                            params.drag_coefficient,
                         ),
                     })
                     .collect();
@@ -309,6 +313,7 @@ struct ParamsText {
     angle_step: String,
     goal_height: String,
     max_velocity: String,
+    drag_coefficient: String,
 }
 
 impl ParamsText {
@@ -322,6 +327,7 @@ impl ParamsText {
             angle_step: p.angle_step.to_string(),
             goal_height: p.goal_height.to_string(),
             max_velocity: p.max_velocity.to_string(),
+            drag_coefficient: p.drag_coefficient.to_string(),
         }
     }
 }
@@ -342,6 +348,7 @@ impl App {
         let angle_step = parse(&self.input_text.angle_step, "angle step")?;
         let goal_height = parse(&self.input_text.goal_height, "goal height")?;
         let max_velocity = parse(&self.input_text.max_velocity, "max velocity")?;
+        let drag_coefficient = parse(&self.input_text.drag_coefficient, "drag coefficient")?;
 
         if dist_max < dist_min {
             return Err("Distance max must be >= distance min".into());
@@ -361,6 +368,9 @@ impl App {
         if max_velocity <= 0.0 {
             return Err("Max velocity must be > 0".into());
         }
+        if drag_coefficient < 0.0 {
+            return Err("Drag coefficient must be >= 0".into());
+        }
 
         Ok(Params {
             dist_min,
@@ -371,6 +381,7 @@ impl App {
             angle_step,
             goal_height,
             max_velocity,
+            drag_coefficient,
         })
     }
 
@@ -462,6 +473,10 @@ impl App {
                     ui.label("Max velocity (m/s)");
                     ui.text_edit_singleline(&mut self.input_text.max_velocity);
                     ui.end_row();
+
+                    ui.label("Drag coefficient");
+                    ui.text_edit_singleline(&mut self.input_text.drag_coefficient);
+                    ui.end_row();
                 });
 
             ui.add_space(12.0);
@@ -531,7 +546,7 @@ impl App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Overview");
             ui.label(format!(
-                "Sweep: {}–{} m ({} m step) × {}–{}° ({}° step), goal height {} m, max velocity {} m/s",
+                "Sweep: {}–{} m ({} m step) × {}–{}° ({}° step), goal height {} m, max velocity {} m/s, drag coefficient {}",
                 dataset.params.dist_min,
                 dataset.params.dist_max,
                 dataset.params.dist_step,
@@ -540,6 +555,7 @@ impl App {
                 dataset.params.angle_step,
                 dataset.params.goal_height,
                 dataset.params.max_velocity,
+                dataset.params.drag_coefficient,
             ));
             ui.add_space(12.0);
 

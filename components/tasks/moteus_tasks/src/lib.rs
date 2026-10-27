@@ -92,6 +92,8 @@ impl CuTask for MoteusDataSplitter {
 
 type LeftMoteusData = MoteusData;
 type RightMoteusData = MoteusData;
+pub type DriveMoteusFaults = [i8; 2];
+pub type DriveMoteusModes = [i8; 2];
 
 /// Collects individual motor telemetry and produces diff-drive wheel speeds.
 ///
@@ -106,7 +108,7 @@ impl Freezable for MoteusDiff {}
 
 impl CuTask for MoteusDiff {
     type Input<'m> = input_msg!('m, LeftMoteusData, RightMoteusData);
-    type Output<'m> = output_msg!(DiffDriveSpeeds);
+    type Output<'m> = output_msg!('m, DiffDriveSpeeds, DriveMoteusFaults, DriveMoteusModes);
     type Resources<'r> = ();
 
     fn new(config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
@@ -132,10 +134,12 @@ impl CuTask for MoteusDiff {
         };
 
         let r = self.wheel_radius.get::<meter>();
-        output.set_payload(DiffDriveSpeeds {
+        output.0.set_payload(DiffDriveSpeeds {
             left: Velocity::new::<meter_per_second>(left.data.vel.get::<radian_per_second>() * r),
             right: Velocity::new::<meter_per_second>(right.data.vel.get::<radian_per_second>() * r),
         });
+        output.1.set_payload([left.fault, right.fault]);
+        output.2.set_payload([left.mode, right.mode]);
         Ok(())
     }
 }
@@ -231,6 +235,7 @@ mod tests {
             temp: 41.5,
             voltage: 23.8,
             fault: -2,
+            mode: 10,
         }));
 
         let output = run_splitter(input);

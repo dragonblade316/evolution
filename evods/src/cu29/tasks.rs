@@ -37,7 +37,9 @@ impl CuTask for DsRx {
             output: &mut Self::Output<'_>,
         ) -> cu29::CuResult<()> {
             let cmd = if let Some(cmd) = input.payload() {
-                if cmd.seq <= self.seq {
+                if cmd.seq <= self.seq
+                    && ctx.now() - self.last_message_timestamp <= CuDuration::from_millis(500)
+                {
                     return Err(CuError::new(199)
                         .add_cause("DsTxMsg received out of order; leaving the last command active"));
                 }

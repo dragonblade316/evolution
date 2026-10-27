@@ -5,6 +5,9 @@ let
     url = "https://github.com/dragonblade316.keys";
     hash = "sha256-u+cXfHsMvXETvNDU5m4hxGMLKijX8DHliY5TaUFwKec=";
   };
+  moteus = pkgs.callPackage "${robotics-scripts.outPath}/moteus.nix" {
+    fetchPypi = pkgs.buildPackages.fetchPypi;
+  };
 in
 {
   imports = [
@@ -138,13 +141,27 @@ in
     git
     rsync
     vim
-    robotics-scripts.packages.${pkgs.stdenv.hostPlatform.system}.moteus
+    moteus
+    libraspberrypi
+    lm_sensors
+    i2c-tools
+    spi-tools
+    libgpiod
   ];
 
-  nix.settings.experimental-features = [
-    "nix-command"
-    "flakes"
-  ];
+  zramSwap = {
+    enable = true;
+    memoryPercent = 400;
+  };
+
+  nix.settings = {
+    experimental-features = [
+      "nix-command"
+      "flakes"
+    ];
+    max-jobs = 1;
+    cores = 1;
+  };
 
   programs.nix-ld.enable = true;
 

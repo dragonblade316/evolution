@@ -86,6 +86,8 @@ pub use pc::{
 #[cfg(feature = "sim-debug")]
 pub struct MasterpieceVisualizer {
     rerun: rerun::RecordingStream,
+    last_drive_faults: [Option<i8>; 2],
+    last_drive_modes: [Option<i8>; 2],
 }
 
 #[cfg(feature = "sim-debug")]
@@ -108,23 +110,34 @@ impl MasterpieceVisualizer {
         rerun
             .log_static("field/mesh", &field)
             .map_err(|error| CuError::from(format!("failed to log field STL: {error}")))?;
-        Ok(Self { rerun })
+        Ok(Self {
+            rerun,
+            last_drive_faults: [None; 2],
+            last_drive_modes: [None; 2],
+        })
     }
 }
 
 #[cfg(feature = "sim-debug")]
 trait MasterpieceVisualizationData: CopperListTuple + CuPayloadRawBytes {
     fn pose(&self) -> Option<&cu_spatial_payloads::Pose<f64>>;
+    fn gamepad(&self) -> Option<&common::GamePadState>;
     fn intake_command(&self) -> Option<&common::MotorCMD>;
     fn turret_state(&self) -> Option<&common::TurretState>;
     fn left_drive_command(&self) -> Option<&common::MotorCMD>;
     fn right_drive_command(&self) -> Option<&common::MotorCMD>;
+    fn drive_faults(&self) -> Option<&moteus_tasks::DriveMoteusFaults>;
+    fn drive_modes(&self) -> Option<&moteus_tasks::DriveMoteusModes>;
 }
 
 #[cfg(feature = "sim-debug")]
 impl MasterpieceVisualizationData for MasterpieceDataSet {
     fn pose(&self) -> Option<&cu_spatial_payloads::Pose<f64>> {
         self.get_pose_estimator_output_0().payload()
+    }
+
+    fn gamepad(&self) -> Option<&common::GamePadState> {
+        self.get_dsrx_output_1().payload()
     }
 
     fn intake_command(&self) -> Option<&common::MotorCMD> {
@@ -141,6 +154,14 @@ impl MasterpieceVisualizationData for MasterpieceDataSet {
 
     fn right_drive_command(&self) -> Option<&common::MotorCMD> {
         self.get_diffdrivecmd_output_1().payload()
+    }
+
+    fn drive_faults(&self) -> Option<&moteus_tasks::DriveMoteusFaults> {
+        self.get_diffdrivereader_output_1().payload()
+    }
+
+    fn drive_modes(&self) -> Option<&moteus_tasks::DriveMoteusModes> {
+        self.get_diffdrivereader_output_2().payload()
     }
 }
 
@@ -150,6 +171,10 @@ impl MasterpieceVisualizationData for MasterpiecePcDataSet {
         self.get_pose_estimator_output_0().payload()
     }
 
+    fn gamepad(&self) -> Option<&common::GamePadState> {
+        self.get_dsrx_output_1().payload()
+    }
+
     fn intake_command(&self) -> Option<&common::MotorCMD> {
         self.get_s_1_intake_state_machine_output_0().payload()
     }
@@ -165,16 +190,114 @@ impl MasterpieceVisualizationData for MasterpiecePcDataSet {
     fn right_drive_command(&self) -> Option<&common::MotorCMD> {
         self.get_diffdrivecmd_output_1().payload()
     }
+
+    fn drive_faults(&self) -> Option<&moteus_tasks::DriveMoteusFaults> {
+        self.get_diffdrivereader_output_1().payload()
+    }
+
+    fn drive_modes(&self) -> Option<&moteus_tasks::DriveMoteusModes> {
+        self.get_diffdrivereader_output_2().payload()
+    }
 }
 
 #[cfg(feature = "sim-debug")]
-impl<P> cuviz::Visualizer<P> for MasterpieceVisualizer
+fn moteus_mode_name(mode: i8) -> &'static str {
+    match mode {
+        0 => "stopped",
+        1 => "fault",
+        2 => "enabling",
+        3 => "calibrating",
+        4 => "calibration complete",
+        5 => "pwm",
+        6 => "voltage",
+        7 => "voltage foc",
+        8 => "voltage dq",
+        9 => "current",
+        10 => "position",
+        11 => "timeout",
+        12 => "zero velocity",
+        13 => "stay within",
+        14 => "measure inductance",
+        15 => "brake",
+        _ => "unknown",
+    }
+}
+
+#[cfg(feature = "sim-debug")]
+impl<P> evoviz::Visualizer<P> for MasterpieceVisualizer
 where
     P: MasterpieceVisualizationData + 'static,
 {
     fn visualize_copperlist(&mut self, copperlist: &CopperList<P>) -> CuResult<()> {
         self.rerun
             .set_time_sequence("copperlist", copperlist.id as i64);
+
+        let messages = copperlist.msgs.cumsgs();
+        let loop_start = messages.first().and_then(|message| {
+            Option::<CuTime>::from(message.metadata().process_time().start)
+        });
+        let loop_end = messages.last().and_then(|message| {
+            Option::<CuTime>::from(message.metadata().process_time().end)
+        });
+        if let (Some(start), Some(end)) = (loop_start, loop_end) {
+            if end >= start {
+                self.rerun
+                    .log(
+                        "copper/timing/end_to_end_ms",
+                        &rerun::Scalars::single((end - start).as_nanos() as f64 / 1_000_000.0),
+                    )
+                    .map_err(|error| {
+                        CuError::from(format!("failed to log Copper loop time: {error}"))
+                    })?;
+            }
+        }
+
+        let component_ids = P::get_all_task_ids();
+        for (index, (component_id, message)) in
+            component_ids.iter().zip(messages.iter()).enumerate()
+        {
+            if component_ids[..index].contains(component_id) {
+                continue;
+            }
+
+            let process_time = message.metadata().process_time();
+            let start = Option::<CuTime>::from(process_time.start);
+            let end = Option::<CuTime>::from(process_time.end);
+            if let (Some(start), Some(end)) = (start, end) {
+                if end >= start {
+                    self.rerun
+                        .log(
+                            format!("copper/timing/components/{component_id}_ms"),
+                            &rerun::Scalars::single(
+                                (end - start).as_nanos() as f64 / 1_000_000.0,
+                            ),
+                        )
+                        .map_err(|error| {
+                            CuError::from(format!(
+                                "failed to log Copper component {component_id} time: {error}"
+                            ))
+                        })?;
+                }
+            }
+        }
+
+        if let Some(gamepad) = copperlist.msgs.gamepad() {
+            for (axis, value) in [
+                ("left_x", gamepad.left_x),
+                ("left_y", gamepad.left_y),
+                ("right_x", gamepad.right_x),
+                ("right_y", gamepad.right_y),
+            ] {
+                self.rerun
+                    .log(
+                        format!("driver_station/joystick/{axis}"),
+                        &rerun::Scalars::single(value),
+                    )
+                    .map_err(|error| {
+                        CuError::from(format!("failed to log joystick {axis}: {error}"))
+                    })?;
+            }
+        }
 
         if let Some(common::MotorCMD::Velocity(velocity, _)) =
             copperlist.msgs.left_drive_command()
@@ -204,6 +327,63 @@ where
                 .map_err(|error| {
                     CuError::from(format!("failed to log right diff-drive command: {error}"))
                 })?;
+        }
+
+        if let Some(faults) = copperlist.msgs.drive_faults() {
+            for (index, motor) in ["left", "right"].into_iter().enumerate() {
+                let fault = faults[index];
+                if self.last_drive_faults[index] == Some(fault) {
+                    continue;
+                }
+
+                let level = if fault == 0 {
+                    rerun::TextLogLevel::INFO
+                } else {
+                    rerun::TextLogLevel::ERROR
+                };
+                self.rerun
+                    .log(
+                        format!("faults/moteus/drive_{motor}"),
+                        &rerun::TextLog::new(format!("fault code: {fault}"))
+                            .with_level(level),
+                    )
+                    .map_err(|error| {
+                        CuError::from(format!(
+                            "failed to log drive {motor} Moteus fault: {error}"
+                        ))
+                    })?;
+                self.last_drive_faults[index] = Some(fault);
+            }
+        }
+
+        if let Some(modes) = copperlist.msgs.drive_modes() {
+            for (index, motor) in ["left", "right"].into_iter().enumerate() {
+                let mode = modes[index];
+                if self.last_drive_modes[index] == Some(mode) {
+                    continue;
+                }
+
+                let level = if matches!(mode, 1 | 11) {
+                    rerun::TextLogLevel::ERROR
+                } else {
+                    rerun::TextLogLevel::INFO
+                };
+                self.rerun
+                    .log(
+                        format!("modes/moteus/drive_{motor}"),
+                        &rerun::TextLog::new(format!(
+                            "mode {mode}: {}",
+                            moteus_mode_name(mode)
+                        ))
+                        .with_level(level),
+                    )
+                    .map_err(|error| {
+                        CuError::from(format!(
+                            "failed to log drive {motor} Moteus mode: {error}"
+                        ))
+                    })?;
+                self.last_drive_modes[index] = Some(mode);
+            }
         }
 
         if let Some(pose) = copperlist.msgs.pose() {
@@ -300,17 +480,17 @@ where
 
 #[cfg(feature = "sim-debug")]
 pub type MasterpieceEvoVisualizer =
-    cuviz::EvoVisualizer<MasterpieceDataSet, MasterpieceVisualizer>;
+    evoviz::EvoVisualizer<MasterpieceDataSet, MasterpieceVisualizer>;
 #[cfg(feature = "sim-debug")]
 pub type MasterpiecePcEvoVisualizer =
-    cuviz::EvoVisualizer<MasterpiecePcDataSet, MasterpieceVisualizer>;
+    evoviz::EvoVisualizer<MasterpiecePcDataSet, MasterpieceVisualizer>;
 
 #[cfg(feature = "sim-debug")]
 pub fn evo_visualizer() -> CuResult<MasterpieceEvoVisualizer> {
-    Ok(cuviz::EvoVisualizer::new(MasterpieceVisualizer::spawn()?))
+    Ok(evoviz::EvoVisualizer::new(MasterpieceVisualizer::spawn()?))
 }
 
 #[cfg(feature = "sim-debug")]
 pub fn evo_pc_visualizer() -> CuResult<MasterpiecePcEvoVisualizer> {
-    Ok(cuviz::EvoVisualizer::new(MasterpieceVisualizer::spawn()?))
+    Ok(evoviz::EvoVisualizer::new(MasterpieceVisualizer::spawn()?))
 }

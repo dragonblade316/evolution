@@ -19,7 +19,6 @@ pub mod odom;
 #[derive(Reflect)]
 pub struct DiffDriveKinematics {
     trackwidth: Length,
-    wheel_radius: Length,
 }
 
 impl Freezable for DiffDriveKinematics {}
@@ -36,16 +35,7 @@ impl CuTask for DiffDriveKinematics {
     where
         Self: Sized,
     {
-        const DEFAULT_WHEEL_RADIUS_METERS: f32 = 0.1;
         const DEFAULT_TRACKWIDTH: f32 = 0.3;
-
-        let wheel_radius = match config {
-            Some(cfg) => Length::new::<meter>(
-                cfg.get::<f32>("wheel_radius")?
-                    .unwrap_or(DEFAULT_WHEEL_RADIUS_METERS),
-            ),
-            None => Length::new::<meter>(DEFAULT_WHEEL_RADIUS_METERS),
-        };
 
         let trackwidth = match config {
             Some(cfg) => Length::new::<meter>(
@@ -55,10 +45,7 @@ impl CuTask for DiffDriveKinematics {
             None => Length::new::<meter>(DEFAULT_TRACKWIDTH),
         };
 
-        Ok(Self {
-            wheel_radius,
-            trackwidth,
-        })
+        Ok(Self { trackwidth })
     }
 
     fn process(

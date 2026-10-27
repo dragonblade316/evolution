@@ -1,6 +1,13 @@
 { pkgs, ... }:
 
 let
+  rebuildRobot = pkgs.writeShellScriptBin "evolution-system-rebuild" ''
+    exec ${pkgs.nixos-rebuild}/bin/nixos-rebuild switch --refresh \
+      --max-jobs 1 \
+      --cores 1 \
+      --flake github:dragonblade316/evolution#robot
+  '';
+
   setupPwm = pkgs.writeShellScript "setup-evolution-pwm" ''
     set -eu
 
@@ -45,16 +52,19 @@ in
       users = [ "dragonblade316" ];
       commands = [
         {
-          command = "${pkgs.systemd}/bin/systemctl restart evolution.service";
+          command = "ALL";
           options = [ "NOPASSWD" ];
         }
       ];
     }
   ];
 
+  environment.systemPackages = [ rebuildRobot ];
+
   systemd.services.evolution = {
     description = "Evolution robot application";
     wantedBy = [ "multi-user.target" ];
+    requires = [ "zenohd.service" ];
     wants = [
       "evolution-network.service"
       "network-online.target"
@@ -62,6 +72,7 @@ in
     after = [
       "evolution-network.service"
       "network-online.target"
+      "zenohd.service"
     ];
 
     unitConfig.ConditionPathIsExecutable = "/opt/evolution/bin/evolution";

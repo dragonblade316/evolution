@@ -26,11 +26,31 @@ pub type TurretAngle = Angle;
 /// Muzzle speed along the firing axis. SI meters/second.
 pub type MuzzleVelocity = Velocity;
 
-struct Ball {}
-impl SecondOrderSystem for Ball {
-    fn acceleration(&self, t: f64, q: &[f64], a: &mut [f64]) {
-        a[0] = 0.0;
-        a[1] = -9.81;
+pub const DEFAULT_DRAG_COEFFICIENT: f64 = 0.5;
+
+const AIR_DENSITY: f64 = 1.204;
+const BALL_RADIUS: f64 = 0.15;
+const BALL_MASS: f64 = 0.283;
+const BALL_CROSS_SECTIONAL_AREA: f64 = PI * BALL_RADIUS * BALL_RADIUS;
+
+struct Ball {
+    drag_coefficient: f64,
+}
+
+impl FirstOrderSystem for Ball {
+    fn derivative(&self, _t: f64, state: &[f64], derivative: &mut [f64]) {
+        let vx = state[2];
+        let vy = state[3];
+        let speed = f64::hypot(vx, vy);
+        let drag_factor = 0.5 * AIR_DENSITY * self.drag_coefficient
+            * BALL_CROSS_SECTIONAL_AREA
+            / BALL_MASS
+            * speed;
+
+        derivative[0] = vx;
+        derivative[1] = vy;
+        derivative[2] = -drag_factor * vx;
+        derivative[3] = -9.81 - drag_factor * vy;
     }
 }
 
@@ -38,6 +58,7 @@ impl SecondOrderSystem for Ball {
 pub struct SOTM {
     /// 3D position of the turret relative to the robot center [x, y, z]
     turret_offset: [f64; 3],
+    drag_coefficient: f64,
 }
 
 impl SOTM {
@@ -56,21 +77,24 @@ impl SOTM {
     ///angle_deg: launch (hood) angle above the horizontal, in degrees.
     ///Returns: Some([velocity_out, tof]) on convergence, or None if the shot is
     ///unsolvable for the given angle/distance (e.g. too close to the goal).
-    fn solve_range(qt: [f64; 2], vcx: f64, angle_deg: f64) -> Option<[f64; 2]> {
-        let q0 = [0.0,0.0];
-
+    fn solve_range(
+        qt: [f64; 2],
+        vcx: f64,
+        angle_deg: f64,
+        drag_coefficient: f64,
+    ) -> Option<[f64; 2]> {
         let target_objective = |guess: DVector<f64>| {
             let vx = guess[0] * f64::cos(angle_deg * (PI/180.0));
             let vy = guess[0] * f64::sin(angle_deg * (PI/180.0));
             let tof = guess[1];
-
-            let v0 = [vx+vcx, vy];
+            let initial_state = [0.0, 0.0, vx + vcx, vy];
 
             if tof <= 0.0 {
                 return DVector::from_vec(vec![1e6, 1e6, 1e6]);
             }
 
-            let Ok(sol) = Ivp::second_order(&Ball {}, 0.0, tof, &q0, &v0).solve() else {
+            let ball = Ball { drag_coefficient };
+            let Ok(sol) = Ivp::first_order(&ball, 0.0, tof, &initial_state).solve() else {
                 return DVector::from_vec(vec![1e6, 1e6, 1e6]);
             };
             let Some(y) = sol.y.last() else {
@@ -117,16 +141,19 @@ impl SOTM {
         v_perpendicular: f64,
         heading: f64,
         goal_direction: f64,
+        drag_coefficient: f64,
     ) -> Option<(f64, f64)> {
         // `heading` is the world angle of robot-local +X. Robot-forward and
         // turret zero are local +Y, which is another 90 degrees CCW.
         let angle_front_to_goal = goal_direction - heading - FRAC_PI_2;
 
         let qt = [dist_to_goal, dz];
-        let [_velocity, tof] = Self::solve_range(qt, v_parallel, 60.0)?;
+        let [_velocity, tof] =
+            Self::solve_range(qt, v_parallel, 60.0, drag_coefficient)?;
         let (theta, r) = Self::solve_angle(v_perpendicular, dist_to_goal, tof);
         let qt = [r, dz];
-        let [velocity_out, _] = Self::solve_range(qt, v_parallel, 60.0)?;
+        let [velocity_out, _] =
+            Self::solve_range(qt, v_parallel, 60.0, drag_coefficient)?;
 
         let turret_angle = angle_front_to_goal + theta;
         Some((turret_angle, velocity_out))
@@ -152,8 +179,14 @@ impl CuTask for SOTM {
         let turret_offset = config
             .and_then(|cfg| cfg.get_value::<[f64; 3]>("turret_offset").ok().flatten())
             .unwrap_or(DEFAULT_TURRET_OFFSET);
+        let drag_coefficient = config
+            .and_then(|cfg| cfg.get_value::<f64>("drag_coefficient").ok().flatten())
+            .unwrap_or(DEFAULT_DRAG_COEFFICIENT);
 
-        Ok(Self { turret_offset })
+        Ok(Self {
+            turret_offset,
+            drag_coefficient,
+        })
     }
 
     fn process(
@@ -229,7 +262,13 @@ impl CuTask for SOTM {
         let goal_direction = f64::atan2(dy, dx);
 
         let Some((turret_angle, muzzle_velocity)) = Self::solve(
-            dist_to_goal, dz, v_parallel, v_perpendicular, heading, goal_direction,
+            dist_to_goal,
+            dz,
+            v_parallel,
+            v_perpendicular,
+            heading,
+            goal_direction,
+            self.drag_coefficient,
         ) else {
             return Ok(());
         };
@@ -259,6 +298,7 @@ impl CuTask for SOTM {
 /// `max_velocity` is the physically plausible ceiling (m/s). Solutions above
 /// this — or below `MIN_VELOCITY` — are treated as unsolvable, which happens
 /// near the singularity where the solver converges on absurd values.
+/// `drag_coefficient` is the dimensionless aerodynamic drag coefficient.
 const MIN_VELOCITY: f64 = 0.1;
 
 pub fn solve_muzzle_velocity(
@@ -266,8 +306,9 @@ pub fn solve_muzzle_velocity(
     dz: f64,
     hood_angle_deg: f64,
     max_velocity: f64,
+    drag_coefficient: f64,
 ) -> Option<f64> {
-    SOTM::solve_range([distance, dz], 0.0, hood_angle_deg)
+    SOTM::solve_range([distance, dz], 0.0, hood_angle_deg, drag_coefficient)
         .map(|[v, _]| v)
         .filter(|&v| v >= MIN_VELOCITY && v <= max_velocity)
 }

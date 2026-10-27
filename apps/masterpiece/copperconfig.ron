@@ -25,6 +25,7 @@
         id: "drivetokinematics",
         type: "diffdrive::DiffDriveKinematics",
         kind: task,
+        config: { "trackwidth": 0.1771, },
     ),
         (
         id: "dsrx",
@@ -78,6 +79,7 @@
         id: "odom",
         type: "diffdrive::odom::DiffDriveOdometry",
         kind: task,
+        config: { "axle_offset": 0.12336901, "trackwidth": 0.1771, "wheel_radius": 0.0508, },
     ),
         (
         id: "diffdrivereader",
@@ -87,6 +89,17 @@
         (
         id: "diffdrivecmd",
         type: "diffdrive::DiffDriveCmd",
+        kind: task,
+        config: { "wheel_radius": 0.0508, },
+    ),
+        (
+        id: "drive_left_gate",
+        type: "tasks::MotorCmdGate",
+        kind: task,
+    ),
+        (
+        id: "drive_right_gate",
+        type: "tasks::MotorCmdGate",
         kind: task,
     ),
         (
@@ -109,6 +122,7 @@
         id: "s_o_t_m",
         type: "sotm_rt::SOTM",
         kind: task,
+        config: { "drag_coefficient": 0.5, },
     ),
         (
         id: "turret_c_m_d",
@@ -130,6 +144,7 @@
         id: "binary_servo",
         type: "rpsinks::BinaryServo",
         kind: sink,
+        config: { "channel": 0, "deployed_us": 1500.0, "frequency_hz": 50.0, "undeployed_us": 1000.0, },
         missions: ["default"],
     ),
         (
@@ -154,7 +169,7 @@
         (
         id: "evo_ds_bridge",
         type: "bridges::EvoDsBridge",
-        config: { "wire_format": "json", },
+        config: { "wire_format": "json", "zenoh_config_json": "{ mode: \"client\", connect: { endpoints: [\"tcp/127.0.0.1:7447\"] } }", },
         channels: [
             Tx(
             id: "telemetry",
@@ -239,6 +254,16 @@
         src: "diffdrivereader",
         dst: "odom",
         msg: "common::DiffDriveSpeeds",
+    ),
+        (
+        src: "diffdrivereader",
+        dst: "__nc__",
+        msg: "moteus_tasks::DriveMoteusFaults",
+    ),
+        (
+        src: "diffdrivereader",
+        dst: "__nc__",
+        msg: "moteus_tasks::DriveMoteusModes",
     ),
         (
         src: "odom",
@@ -369,13 +394,33 @@
     ),
         (
         src: "diffdrivecmd",
-        dst: "moteus/drive_left",
+        dst: "drive_left_gate",
         msg: "diffdrive::LeftMotorCMD",
     ),
         (
+        src: "s1_behavior",
+        dst: "drive_left_gate",
+        msg: "crate::messages::SuperState",
+    ),
+        (
+        src: "drive_left_gate",
+        dst: "moteus/drive_left",
+        msg: "common::MotorCMD",
+    ),
+        (
         src: "diffdrivecmd",
-        dst: "moteus/drive_right",
+        dst: "drive_right_gate",
         msg: "diffdrive::RightMotorCMD",
+    ),
+        (
+        src: "s1_behavior",
+        dst: "drive_right_gate",
+        msg: "crate::messages::SuperState",
+    ),
+        (
+        src: "drive_right_gate",
+        dst: "moteus/drive_right",
+        msg: "common::MotorCMD",
     ),
         (
         src: "s1_intake_state_machine",

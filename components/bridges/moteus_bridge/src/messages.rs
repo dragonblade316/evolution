@@ -10,7 +10,8 @@ pub struct MoteusData {
     pub data: common::MotorData,
     pub temp: f32,
     pub voltage: f32,
-    pub fault: i8
+    pub fault: i8,
+    pub mode: i8,
 }
 
 impl Default for MoteusData {
@@ -21,6 +22,7 @@ impl Default for MoteusData {
             temp: 0.0,
             voltage: 0.0,
             fault: 0,
+            mode: 0,
         }
     }
 }

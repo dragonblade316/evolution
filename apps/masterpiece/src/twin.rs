@@ -1,4 +1,4 @@
-use cu29::logstream::{CuStreamRx, CuStreamRxError};
+use cu29::logstream::{CuStreamRx, CuStreamRxError, SessionRouterLimits};
 use cu29::prelude::*;
 use masterpiece::constants;
 #[cfg(not(feature = "pc"))]
@@ -66,9 +66,14 @@ fn main() -> CuResult<()> {
     .map_err(|error| CuError::new_with_cause("failed to install Ctrl-C handler", error))?;
 
     let receiver = UdpReceiver::bind(&bind_address)?;
+    let receiver_limits = SessionRouterLimits {
+        max_record_bytes: constants::TWIN_MAX_RECORD_BYTES,
+        ..Default::default()
+    };
     let twin = TwinRuntime::twin(receiver)
         .with_log_path(archive)
-        .with_max_record_bytes(constants::TWIN_MAX_RECORD_BYTES);
+        .with_receiver_limits(receiver_limits)
+        .with_section_size(constants::TWIN_MAX_RECORD_BYTES + 1024);
     twin_visualizer()?.run_twin(twin, log_index.as_deref(), stop.as_ref())?;
     Ok(())
 }

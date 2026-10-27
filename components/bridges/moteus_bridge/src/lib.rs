@@ -368,6 +368,7 @@ where
             temp: result.temperature,
             voltage: result.voltage,
             fault: result.fault,
+            mode: result.mode.into(),
         });
         Ok(())
     }
