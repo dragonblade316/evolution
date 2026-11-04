@@ -45,7 +45,7 @@ in
       users = [ "dragonblade316" ];
       commands = [
         {
-          command = "${pkgs.systemd}/bin/systemctl restart evolution.service";
+          command = "ALL";
           options = [ "NOPASSWD" ];
         }
       ];
