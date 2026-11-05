@@ -6,10 +6,12 @@ use cu29::prelude::*;
 use masterpiece::bridges;
 use masterpiece::logstream::{UdpSender, sender_config};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
-const PREALLOCATED_STORAGE_SIZE: Option<usize> = Some(1024 * 1024 * 100);
+const LOG_SLAB_SIZE: usize = 128 * 1024 * 1024;
+const LOG_CAPACITY: usize = 20 * 1024 * 1024 * 1024;
 const APP_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[copper_runtime(config = "copperconfig.ron")]
@@ -24,6 +26,18 @@ fn main() {
             std::fs::create_dir_all(parent).expect("Failed to create logs directory");
         }
     }
+    let logger = UnifiedLoggerBuilder::new()
+        .write(true)
+        .create(true)
+        .file_base_name(&logger_path)
+        .preallocated_size(LOG_SLAB_SIZE)
+        .rollover(LOG_CAPACITY)
+        .build()
+        .expect("Failed to create bounded unified logger.");
+    let UnifiedLogger::Write(logger) = logger else {
+        panic!("Unified logger is not write-capable.");
+    };
+
     debug!("Logger created at {}.", &logger_path);
     debug!("Creating application... ");
     let identity = StreamIdentity {
@@ -40,8 +54,7 @@ fn main() {
             )
             .expect("Failed to configure twin log stream."),
         )
-        .with_log_path(&logger_path, PREALLOCATED_STORAGE_SIZE)
-        .expect("Failed to setup logger.")
+        .with_unified_logger(Arc::new(Mutex::new(logger)))
         .build()
         .expect("Failed to create application.");
     debug!("Streaming to twin at {}.", constants::TWIN_ADDRESS);
