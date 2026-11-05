@@ -39,10 +39,18 @@
     ),
         (
         id: "camera",
-        type: "cu_v4l::V4l",
+        type: "tasks::MjpegCameraSource",
         kind: source,
-        config: { "buffers": 4, "device": 0, "fourcc": "YUYV", "height": 720, "timeout_ms": 500, "width": 1280, },
+        config: { "buffers": 4, "device": 0, "fourcc": "MJPG", "fps": 10, "height": 720, "timeout_ms": 2000, "width": 1280, },
         run_in_sim: false,
+        logging: (enabled: true),
+        missions: ["default"],
+    ),
+        (
+        id: "camera_gray",
+        type: "tasks::MjpegToGray",
+        kind: task,
+        logging: (enabled: true, handle_content: none),
         missions: ["default"],
     ),
         (
@@ -256,22 +264,18 @@
         msg: "common::DiffDriveSpeeds",
     ),
         (
-        src: "diffdrivereader",
-        dst: "__nc__",
-        msg: "moteus_tasks::DriveMoteusFaults",
-    ),
-        (
-        src: "diffdrivereader",
-        dst: "__nc__",
-        msg: "moteus_tasks::DriveMoteusModes",
-    ),
-        (
         src: "odom",
         dst: "pose_estimator",
         msg: "common::ChassisSpeeds",
     ),
         (
         src: "camera",
+        dst: "camera_gray",
+        msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
+        missions: ["default"],
+    ),
+        (
+        src: "camera_gray",
         dst: "apriltag_detector",
         msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
         missions: ["default"],
@@ -432,6 +436,16 @@
         dst: "binary_servo",
         msg: "bool",
         missions: ["default"],
+    ),
+        (
+        src: "diffdrivereader",
+        dst: "__nc__",
+        msg: "moteus_tasks::DriveMoteusFaults",
+    ),
+        (
+        src: "diffdrivereader",
+        dst: "__nc__",
+        msg: "moteus_tasks::DriveMoteusModes",
     ),
         (
         src: "s1_intake_state_machine",
