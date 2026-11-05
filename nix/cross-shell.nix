@@ -29,6 +29,7 @@ pkgs.mkShell {
     "${crossPkgs.stdenv.cc}/bin/${crossPkgs.stdenv.cc.targetPrefix}cc";
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS =
     "-C link-arg=-Wl,--dynamic-linker=/lib/ld-linux-aarch64.so.1";
+  CFLAGS_aarch64_unknown_linux_gnu = "-std=gnu17";
   APRILTAG_SYS_METHOD = "raw,static";
   PKG_CONFIG_ALLOW_CROSS = "1";
 }

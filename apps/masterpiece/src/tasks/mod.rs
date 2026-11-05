@@ -1,10 +1,12 @@
 // mod state_machine;
 pub mod null_camera_source;
+pub mod mjpeg_apriltags;
 pub mod mjpeg_camera_source;
 pub mod mjpeg_to_gray;
 pub mod motor_cmd_gate;
 pub mod pose_log_sink;
 pub use null_camera_source::NullCameraSource;
+pub use mjpeg_apriltags::MjpegAprilTags;
 pub use mjpeg_camera_source::MjpegCameraSource;
 pub use mjpeg_to_gray::MjpegToGray;
 pub use motor_cmd_gate::MotorCmdGate;

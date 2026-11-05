@@ -1,7 +1,7 @@
 {
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:nixos/nixpkgs?ref=release-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
     robotics-scripts = {
       url = "github:dragonblade316/robotics-scripts";
       # inputs.nixpkgs.follows = "nixpkgs";

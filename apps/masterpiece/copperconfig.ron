@@ -10,7 +10,77 @@
             storage: usize,
             value: 2097152,
         ),
+        (
+            id: "TWIN_MAX_OBJECT_BYTES",
+            storage: u64,
+            value: 131072,
+        ),
     ],
+    //logging: (
+    //    slab_size_mib: 256,      // Total memory-mapped slab size in MiB
+    //    section_size_mib: 8,    // Pre-allocated size per log section in MiB
+    //    keyframe_interval: 100,   // Number of copperlists between keyframes
+    //),
+    runtime: (
+        thread_pools: [
+            (id: "background", threads: 1),
+        ],
+    ),
+    resources: [
+        (
+            id: "twin_udp",
+            provider: "cu29_logstream_udp::CuUdpLogStreamResources",
+            config: {
+                "bind_addr": "0.0.0.0:0",
+                "remote_addr": "192.168.12.189:9000",
+                "send_buffer_bytes": 33554432,
+            },
+        ),
+    ],
+    log_streaming: (
+        destinations: [
+            (
+                id: "twin",
+                transport: (
+                    type: "cu29_logstream_udp::CuUdpLogStreamTx",
+                    resource: "twin_udp.tx",
+                ),
+                feedback: (
+                    transport: (
+                        type: "cu29_logstream_udp::CuUdpLogStreamRx",
+                        resource: "twin_udp.rx",
+                    ),
+                    report_interval_ms: 100,
+                    timeout_ms: 1000,
+                    adaptation: (
+                        min_repair_every_source_symbols: 4,
+                        max_repair_every_source_symbols: 32,
+                    ),
+                ),
+                link: (
+                    mtu_bytes: 1200,
+                    bitrate_bps: 200000000,
+                    memory_budget_kib: 524288,
+                    max_latency_ms: 120,
+                    burst_packets: 32,
+                ),
+                fec: (
+                    continuous: (
+                        field: Gf256,
+                        window_symbols: 16,
+                        repair_every_source_symbols: 32,
+                        repair_density: Full,
+                    ),
+                    objects: (
+                        max_object_bytes: 65536,
+                        repair_symbols_per_block: 2,
+                    ),
+                ),
+                recovery_interval: 600,
+                max_record_bytes: 2097152,
+            ),
+        ],
+    ),
     missions: [
         (id: "default"),
         (id: "pc"),
@@ -47,13 +117,6 @@
         missions: ["default"],
     ),
         (
-        id: "camera_gray",
-        type: "tasks::MjpegToGray",
-        kind: task,
-        logging: (enabled: true, handle_content: none),
-        missions: ["default"],
-    ),
-        (
         id: "null_camera",
         type: "tasks::NullCameraSource",
         kind: source,
@@ -61,9 +124,10 @@
     ),
         (
         id: "apriltag_detector",
-        type: "cu_apriltag::AprilTags",
+        type: "tasks::MjpegAprilTags",
         kind: task,
-        config: { "bits_corrected": 1, "cx": 605.5026981265167, "cy": 399.29058993159094, "family": "tag16h5", "fx": 1077.5364936413373, "fy": 1077.7948707218447, "tag_size": 0.0, },
+        config: { "bits_corrected": 1, "cx": 605.5026981265167, "cy": 399.29058993159094, "family": "tag16h5", "fx": 1077.5364936413373, "fy": 1077.7948707218447, "tag_size": 0.1524, },
+        background: true,
     ),
         (
         id: "apriltag_pose",
@@ -270,12 +334,6 @@
     ),
         (
         src: "camera",
-        dst: "camera_gray",
-        msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
-        missions: ["default"],
-    ),
-        (
-        src: "camera_gray",
         dst: "apriltag_detector",
         msg: "cu_sensor_payloads::CuImage<Vec<u8>>",
         missions: ["default"],

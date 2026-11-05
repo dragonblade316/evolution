@@ -56,10 +56,19 @@ masterpiece-sim:
 
   cargo run -p masterpiece --features=sim-debug --bin masterpiece-sim
 
-# Receive the robot's live Copper stream and run its digital twin.
+# Receive the robot's live Copper stream and run its digital twin and driver station.
 masterpiece-twin:
   #!/usr/bin/env bash
   set -euo pipefail
+
+  cargo run -p evods -- evolution.local &
+  EVODS_PID=$!
+
+  cleanup() {
+    kill "$EVODS_PID" 2>/dev/null || true
+    wait "$EVODS_PID" 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM
 
   LIVE_ARCHIVE="apps/masterpiece/logs/masterpiece_live_$(date +%Y%m%d_%H%M%S).copper"
   cargo run -p masterpiece --features=sim-debug --bin masterpiece-twin -- \

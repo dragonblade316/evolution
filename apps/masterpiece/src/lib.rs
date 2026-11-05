@@ -1,10 +1,10 @@
-#[cfg(feature = "logstream")]
-pub mod logstream;
 pub mod messages;
 pub mod tasks;
 
 #[cfg(feature = "sim-debug")]
 use cu29::prelude::*;
+#[cfg(feature = "sim-debug")]
+use std::time::{Duration, Instant};
 
 //This file exists mostly to configure the moteus and zenoh bridges. The reason it is a seperate file is bc these defs will be needed for both the sim.rs and main.rs apps
 pub mod bridges {
@@ -86,6 +86,7 @@ pub use pc::{
 #[cfg(feature = "sim-debug")]
 pub struct MasterpieceVisualizer {
     rerun: rerun::RecordingStream,
+    last_visualization: Option<Instant>,
     last_drive_faults: [Option<i8>; 2],
     last_drive_modes: [Option<i8>; 2],
 }
@@ -112,6 +113,7 @@ impl MasterpieceVisualizer {
             .map_err(|error| CuError::from(format!("failed to log field STL: {error}")))?;
         Ok(Self {
             rerun,
+            last_visualization: None,
             last_drive_faults: [None; 2],
             last_drive_modes: [None; 2],
         })
@@ -229,6 +231,15 @@ where
     P: MasterpieceVisualizationData + 'static,
 {
     fn visualize_copperlist(&mut self, copperlist: &CopperList<P>) -> CuResult<()> {
+        let now = Instant::now();
+        if self
+            .last_visualization
+            .is_some_and(|last| now.duration_since(last) < Duration::from_secs_f64(1.0 / 30.0))
+        {
+            return Ok(());
+        }
+        self.last_visualization = Some(now);
+
         self.rerun
             .set_time_sequence("copperlist", copperlist.id as i64);
 

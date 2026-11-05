@@ -1,10 +1,8 @@
 mod messages;
 mod tasks;
 
-use cu29::logstream::{StreamIdentity, new_session_id};
 use cu29::prelude::*;
 use masterpiece::bridges;
-use masterpiece::logstream::{UdpSender, sender_config};
 use std::path::Path;
 
 const PREALLOCATED_STORAGE_SIZE: Option<usize> = Some(1024 * 1024 * 100);
@@ -22,21 +20,8 @@ fn main() -> CuResult<()> {
             .map_err(|error| CuError::new_with_cause("failed to create logs directory", error))?;
     }
 
-    let identity = StreamIdentity {
-        session_id: new_session_id(),
-        sender_id: 0,
-    };
-    #[cfg(feature = "sim-debug")]
-    let stream_config = sender_config::<masterpiece::MasterpiecePcDataSet>(
-        identity,
-        constants::TWIN_MAX_RECORD_BYTES,
-    )?;
-    #[cfg(not(feature = "sim-debug"))]
-    let stream_config =
-        sender_config::<pc::CuStampedDataSet>(identity, constants::TWIN_MAX_RECORD_BYTES)?;
     let application = pc::MasterpieceApplication::builder()
-        .with_instance_id(identity.sender_id)
-        .with_logstream(UdpSender::new(constants::TWIN_ADDRESS)?, stream_config)
+        .with_instance_id(0)
         .with_log_path(&logger_path, PREALLOCATED_STORAGE_SIZE)?
         .build()?;
 

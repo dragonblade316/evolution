@@ -137,10 +137,19 @@ where
         let mut logs = twin
             .take_log_reader()
             .ok_or_else(|| CuError::from("Copper twin log reader is unavailable"))?;
+        let mut reported_gaps = 0;
 
         while !stop.load(Ordering::Relaxed) {
             frames.wait_timeout(Duration::from_millis(20));
             self.drain_twin::<A>(&mut frames, &mut logs)?;
+            let status = frames.status();
+            if status.gaps > reported_gaps {
+                eprintln!(
+                    "Copper twin stream gaps: {}, latest: {:?}, recovery point: {:?}",
+                    status.gaps, status.latest, status.recovery_point
+                );
+                reported_gaps = status.gaps;
+            }
             if frames.is_closed() {
                 break;
             }
