@@ -17,13 +17,23 @@ use cu29::{
     prelude::{BridgeChannel, BridgeChannelConfig, BridgeChannelSet, CuBridge, CuContext},
 };
 use moteus::command::PositionCommand;
+use moteus::query::QueryResult;
 use moteus::transport::Router;
 use moteus::transport::singleton::get_singleton_transport;
-use moteus::{BlockingController, Mode};
+use moteus::transport::transaction::Request;
+use moteus::{Controller, Mode};
+
+#[derive(Debug)]
+enum PendingTx {
+    Position(PositionCommand),
+    Stop,
+}
 
 #[derive(Debug)]
 struct MoteusMotor {
-    ctrl: BlockingController<Arc<Mutex<Router>>>,
+    ctrl: Controller,
+    pending_tx: Option<PendingTx>,
+    pending_rx: Option<QueryResult>,
 }
 
 /// Optional per-TX-channel limits/gains applied to every outgoing position command.
@@ -120,6 +130,8 @@ where
     Tx::Id: Send + Sync + 'static,
     Rx::Id: Send + Sync + 'static,
 {
+    #[reflect(ignore)]
+    transport: Arc<Mutex<Router>>,
     #[reflect(ignore)]
     tx_channels: Vec<MoteusChannelConfig<Tx::Id>>,
     #[reflect(ignore)]
@@ -232,7 +244,9 @@ where
                     id: channel.channel.id,
                     can_id,
                     motor: MoteusMotor {
-                        ctrl: BlockingController::with_transport(can_id as u8, transport.clone()),
+                        ctrl: Controller::new(can_id as u8),
+                        pending_tx: None,
+                        pending_rx: None,
                     },
                     tx_cmd,
                     last_fault: 0,
@@ -256,7 +270,9 @@ where
                     id: channel.channel.id,
                     can_id,
                     motor: MoteusMotor {
-                        ctrl: BlockingController::with_transport(can_id as u8, transport.clone()),
+                        ctrl: Controller::new(can_id as u8),
+                        pending_tx: None,
+                        pending_rx: None,
                     },
                     tx_cmd: TxCommandConfig::default(),
                     last_fault: 0,
@@ -266,9 +282,43 @@ where
             .collect::<CuResult<Vec<_>>>()?;
 
         Ok(MoteusBridge::<Tx, Rx> {
+            transport,
             tx_channels,
             rx_channels,
         })
+    }
+
+    fn preprocess(&mut self, _ctx: &CuContext) -> CuResult<()> {
+        for channel in &mut self.tx_channels {
+            channel.motor.pending_tx = None;
+        }
+
+        let mut requests: Vec<_> = self
+            .rx_channels
+            .iter_mut()
+            .map(|channel| {
+                channel.motor.pending_rx = None;
+                Request::from_command(channel.motor.ctrl.make_query())
+            })
+            .collect();
+
+        let cycle_result = self
+            .transport
+            .lock()
+            .unwrap()
+            .cycle(&mut requests);
+
+        for (channel, request) in self.rx_channels.iter_mut().zip(requests) {
+            channel.motor.pending_rx = request
+                .responses
+                .take()
+                .into_iter()
+                .next()
+                .map(|frame| channel.motor.ctrl.parse_query(&frame));
+        }
+
+        cycle_result
+            .map_err(|error| CuError::new_with_cause("Batched Moteus query failed", error))
     }
 
     fn send<'a, Payload>(
@@ -299,17 +349,12 @@ where
                     return Err(CuError::from("Torque commands are not supported by bridge"));
                 }
                 MotorCMD::Stop => {
-                    let _ = channel_config.motor.ctrl.set_stop();
+                    channel_config.motor.pending_tx = Some(PendingTx::Stop);
                     return Ok(());
                 }
             };
             let cmd = channel_config.tx_cmd.apply(cmd);
-            // debug!("moteus position_cmd can_id={}", channel_config.can_id);
-            channel_config
-                .motor
-                .ctrl
-                .set_position_no_query(&cmd)
-                .map_err(|error| CuError::new_with_cause("Moteus position command failed", error))?;
+            channel_config.motor.pending_tx = Some(PendingTx::Position(cmd));
         }
         Ok(())
     }
@@ -332,9 +377,9 @@ where
 
         let result = channel_config
             .motor
-            .ctrl
-            .query()
-            .map_err(|e| CuError::new_with_cause("Moteus query failed", e))?;
+            .pending_rx
+            .take()
+            .ok_or_else(|| CuError::from("Moteus did not respond to batched query"))?;
 
         if channel_config.last_mode != Some(result.mode) {
             let mode = result.mode.to_string();
@@ -373,11 +418,39 @@ where
         Ok(())
     }
 
-    fn stop(&mut self, _ctx: &CuContext) -> CuResult<()> {
-        //motors registered to tx channels are the only ones that should ever be moving.
-        for c in self.tx_channels.iter_mut() {
-            let _ = c.motor.ctrl.set_stop();
+    fn postprocess(&mut self, _ctx: &CuContext) -> CuResult<()> {
+        let mut requests: Vec<_> = self
+            .tx_channels
+            .iter_mut()
+            .filter_map(|channel| {
+                let command = match channel.motor.pending_tx.take()? {
+                    PendingTx::Position(command) => {
+                        channel.motor.ctrl.make_position_command(&command, false)
+                    }
+                    PendingTx::Stop => channel.motor.ctrl.make_stop(false),
+                };
+                Some(Request::from_command(command))
+            })
+            .collect();
+
+        if requests.is_empty() {
+            return Ok(());
         }
+
+        self.transport
+            .lock()
+            .unwrap()
+            .cycle(&mut requests)
+            .map_err(|error| CuError::new_with_cause("Batched Moteus command failed", error))
+    }
+
+    fn stop(&mut self, _ctx: &CuContext) -> CuResult<()> {
+        let mut requests: Vec<_> = self
+            .tx_channels
+            .iter()
+            .map(|channel| Request::from_command(channel.motor.ctrl.make_stop(false)))
+            .collect();
+        let _ = self.transport.lock().unwrap().cycle(&mut requests);
         Ok(())
     }
 }
